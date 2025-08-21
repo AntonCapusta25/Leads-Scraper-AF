@@ -18,7 +18,8 @@ from datetime import datetime
 import hashlib
 from difflib import SequenceMatcher
 from collections import defaultdict
-
+import glob        # Add this for wildcard path matching
+import uuid        # Add this for random directories
 # API Framework
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
