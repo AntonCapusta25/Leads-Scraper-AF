@@ -1,0 +1,1943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional Contact Scraper</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #e91e63 0%, #f06292 25%, #ba68c8 50%, #9c27b0 75%, #7b1fa2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+        }
+
+        .search-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .search-panel h2 {
+            color: #7b1fa2;
+            margin-bottom: 25px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #e91e63;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #e91e63;
+            box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.1);
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            transform: scale(1.2);
+            accent-color: #e91e63;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #e91e63, #9c27b0);
+            color: white;
+            box-shadow: 0 4px 15px rgba(233, 30, 99, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(233, 30, 99, 0.6);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #ba68c8, #7b1fa2);
+            color: white;
+            box-shadow: 0 4px 15px rgba(186, 104, 200, 0.4);
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(186, 104, 200, 0.6);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn.loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid transparent;
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .results-header h2 {
+            color: #7b1fa2;
+            font-size: 1.5rem;
+        }
+
+        .results-count {
+            background: linear-gradient(45deg, #e91e63, #f06292);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, rgba(233, 30, 99, 0.1), rgba(156, 39, 176, 0.1));
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            border: 1px solid rgba(233, 30, 99, 0.2);
+        }
+
+        .stat-card .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #e91e63;
+            display: block;
+        }
+
+        .stat-card .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .dropdown-container {
+            position: relative;
+        }
+
+        .dropdown {
+            position: relative;
+            width: 100%;
+        }
+
+        .dropdown-button {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: white;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .dropdown-button:hover,
+        .dropdown-button:focus {
+            border-color: #e91e63;
+            box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.1);
+            outline: none;
+        }
+
+        .dropdown-button.active {
+            border-color: #e91e63;
+            box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.1);
+        }
+
+        .dropdown-arrow {
+            font-size: 0.8rem;
+            transition: transform 0.3s ease;
+            color: #666;
+        }
+
+        .dropdown-button.active .dropdown-arrow {
+            transform: rotate(180deg);
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 2px solid #e91e63;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            z-index: 100;
+            max-height: 250px;
+            overflow-y: auto;
+            transform: translateY(-10px);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .dropdown-menu.show {
+            transform: translateY(0);
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .dropdown-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-item:hover {
+            background: linear-gradient(90deg, rgba(233, 30, 99, 0.1), rgba(156, 39, 176, 0.1));
+            color: #e91e63;
+        }
+
+        .dropdown-item.selected {
+            background: linear-gradient(90deg, rgba(233, 30, 99, 0.2), rgba(156, 39, 176, 0.2));
+            color: #7b1fa2;
+            font-weight: 600;
+        }
+
+        .dropdown-search {
+            padding: 10px 16px;
+            border: none;
+            border-bottom: 2px solid #f0f0f0;
+            width: 100%;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .dropdown-search:focus {
+            border-bottom-color: #e91e63;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            background: linear-gradient(135deg, rgba(233, 30, 99, 0.1), rgba(156, 39, 176, 0.1));
+            border-bottom: 1px solid rgba(233, 30, 99, 0.2);
+        }
+
+        .table-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #7b1fa2;
+        }
+
+        .table-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn-export {
+            background: linear-gradient(45deg, #4caf50, #66bb6a);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+        }
+
+        .btn-export:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+
+        .btn-export:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .view-toggle {
+            display: flex;
+            background: rgba(255,255,255,0.8);
+            border-radius: 8px;
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .view-toggle button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .view-toggle button.active {
+            background: linear-gradient(45deg, #e91e63, #9c27b0);
+            color: white;
+            box-shadow: 0 2px 8px rgba(233, 30, 99, 0.3);
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .data-table th {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 700;
+            color: #495057;
+            border-bottom: 2px solid #e91e63;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .data-table td {
+            padding: 15px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: top;
+        }
+
+        .data-table tr:hover {
+            background: linear-gradient(90deg, rgba(233, 30, 99, 0.05), rgba(156, 39, 176, 0.05));
+        }
+
+        .data-table tr:nth-child(even) {
+            background: rgba(248, 249, 250, 0.8);
+        }
+
+        .data-table tr:nth-child(even):hover {
+            background: linear-gradient(90deg, rgba(233, 30, 99, 0.08), rgba(156, 39, 176, 0.08));
+        }
+
+        .table-wrapper {
+            max-height: 600px;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        .confidence-cell {
+            text-align: center;
+        }
+
+        .confidence-bar {
+            width: 60px;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+
+        .confidence-fill.high {
+            background: linear-gradient(90deg, #4caf50, #66bb6a);
+        }
+
+        .confidence-fill.medium {
+            background: linear-gradient(90deg, #ff9800, #ffb74d);
+        }
+
+        .confidence-fill.low {
+            background: linear-gradient(90deg, #f44336, #ef5350);
+        }
+
+        .confidence-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .action-links {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .action-link {
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .action-link.linkedin {
+            background: linear-gradient(45deg, #0077b5, #0088cc);
+            color: white;
+        }
+
+        .action-link.email {
+            background: linear-gradient(45deg, #ea4335, #34a853);
+            color: white;
+        }
+
+        .action-link:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+        }
+
+        .source-badge {
+            background: rgba(123, 31, 162, 0.1);
+            color: #7b1fa2;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            font-weight: 500;
+            display: inline-block;
+        }
+
+        .table-pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .pagination-btn {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: linear-gradient(45deg, #e91e63, #9c27b0);
+            color: white;
+            border-color: transparent;
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .search-summary {
+            background: linear-gradient(135deg, rgba(233, 30, 99, 0.1), rgba(156, 39, 176, 0.1));
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(233, 30, 99, 0.2);
+        }
+
+        .search-summary h4 {
+            color: #7b1fa2;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .search-params {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .search-param {
+            background: rgba(255,255,255,0.8);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #555;
+        }
+
+        /* Mobile responsiveness for table */
+        @media (max-width: 768px) {
+            .data-table {
+                font-size: 0.8rem;
+            }
+            
+            .data-table th,
+            .data-table td {
+                padding: 10px 8px;
+            }
+
+            .table-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: stretch;
+            }
+
+            .table-actions {
+                flex-direction: column;
+            }
+
+            .view-toggle {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .action-links {
+                flex-direction: column;
+            }
+
+            .table-pagination {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+        }
+
+        /* Scrollbar styling */
+        .table-wrapper::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .table-wrapper::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .table-wrapper::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #e91e63, #9c27b0);
+            border-radius: 4px;
+        }
+
+        .table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #c2185b, #7b1fa2);
+        }
+
+        /* Contact Cards Styles (for cards view) */
+        .contact-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .contact-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border-left: 4px solid;
+            border-image: linear-gradient(135deg, #e91e63, #9c27b0) 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .contact-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #e91e63, #f06292, #ba68c8, #9c27b0, #7b1fa2);
+        }
+
+        .contact-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+
+        .contact-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .contact-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #333;
+            margin: 0;
+        }
+
+        .confidence-badge {
+            background: linear-gradient(45deg, #4caf50, #66bb6a);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .confidence-badge.high {
+            background: linear-gradient(45deg, #4caf50, #66bb6a);
+        }
+
+        .confidence-badge.medium {
+            background: linear-gradient(45deg, #ff9800, #ffb74d);
+        }
+
+        .confidence-badge.low {
+            background: linear-gradient(45deg, #f44336, #ef5350);
+        }
+
+        .contact-info {
+            margin-bottom: 10px;
+        }
+
+        .contact-info strong {
+            color: #666;
+            font-weight: 600;
+            display: inline-block;
+            width: 80px;
+            font-size: 0.9rem;
+        }
+
+        .contact-info span {
+            color: #333;
+        }
+
+        .contact-links {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .contact-link {
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .linkedin-link {
+            background: linear-gradient(45deg, #0077b5, #0088cc);
+            color: white;
+        }
+
+        .email-link {
+            background: linear-gradient(45deg, #ea4335, #34a853);
+            color: white;
+        }
+
+        .contact-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .source-tag {
+            background: rgba(123, 31, 162, 0.1);
+            color: #7b1fa2;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-top: 10px;
+            display: inline-block;
+        }
+
+        .alert {
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid;
+        }
+
+        .alert-warning {
+            background: rgba(255, 193, 7, 0.1);
+            color: #856404;
+            border-color: #ffc107;
+        }
+
+        .alert-info {
+            background: rgba(23, 162, 184, 0.1);
+            color: #0c5460;
+            border-color: #17a2b8;
+        }
+
+        .alert-success {
+            background: rgba(40, 167, 69, 0.1);
+            color: #155724;
+            border-color: #28a745;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #999;
+            transition: color 0.3s ease;
+        }
+
+        .modal-close:hover {
+            color: #e91e63;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .loading-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #e91e63;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255,255,255,0.8);
+            margin-top: 50px;
+        }
+
+        .footer a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer a:hover {
+            color: white;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .search-panel,
+            .results-panel {
+                padding: 20px;
+            }
+
+            .contact-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .contact-card {
+                padding: 20px;
+            }
+
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            .search-panel {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔍 Professional Contact Scraper</h1>
+            <p>Find and connect with professionals across industries with AI-powered deduplication</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Search Panel -->
+            <div class="search-panel">
+                <h2>🎯 Search Parameters</h2>
+                
+                <form id="searchForm">
+                    <div class="form-group">
+                        <label for="industry">Industry</label>
+                        <div class="dropdown" id="industryDropdown">
+                            <button type="button" class="dropdown-button" onclick="toggleDropdown('industryDropdown')">
+                                <span>Select Industry...</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <div class="dropdown-menu">
+                                <input type="text" class="dropdown-search" placeholder="Search industries..." onkeyup="filterDropdown('industryDropdown', this.value)">
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', '', 'All Industries')">All Industries</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'technology', 'Technology')">Technology</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'healthcare', 'Healthcare')">Healthcare</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'finance', 'Finance')">Finance</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'education', 'Education')">Education</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'retail', 'Retail')">Retail</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'manufacturing', 'Manufacturing')">Manufacturing</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'consulting', 'Consulting')">Consulting</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'marketing', 'Marketing')">Marketing</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'real estate', 'Real Estate')">Real Estate</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'automotive', 'Automotive')">Automotive</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('industryDropdown', 'entertainment', 'Entertainment')">Entertainment</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="position">Position/Title</label>
+                        <div class="dropdown" id="positionDropdown">
+                            <button type="button" class="dropdown-button" onclick="toggleDropdown('positionDropdown')">
+                                <span>Select Position...</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <div class="dropdown-menu">
+                                <input type="text" class="dropdown-search" placeholder="Search positions..." onkeyup="filterDropdown('positionDropdown', this.value)">
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', '', 'All Positions')">All Positions</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'software engineer', 'Software Engineer')">Software Engineer</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'data scientist', 'Data Scientist')">Data Scientist</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'product manager', 'Product Manager')">Product Manager</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'sales manager', 'Sales Manager')">Sales Manager</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'marketing manager', 'Marketing Manager')">Marketing Manager</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'ceo', 'CEO')">CEO</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'cto', 'CTO')">CTO</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'cfo', 'CFO')">CFO</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'director', 'Director')">Director</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'manager', 'Manager')">Manager</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'analyst', 'Analyst')">Analyst</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('positionDropdown', 'consultant', 'Consultant')">Consultant</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="company">Company</label>
+                        <input type="text" id="company" placeholder="e.g., Google, Microsoft">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="country">Country</label>
+                        <div class="dropdown" id="countryDropdown">
+                            <button type="button" class="dropdown-button" onclick="toggleDropdown('countryDropdown')">
+                                <span>Select Country...</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <div class="dropdown-menu">
+                                <input type="text" class="dropdown-search" placeholder="Search countries..." onkeyup="filterDropdown('countryDropdown', this.value)">
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', '', 'All Countries')">All Countries</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'united states', 'United States')">United States</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'canada', 'Canada')">Canada</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'united kingdom', 'United Kingdom')">United Kingdom</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'germany', 'Germany')">Germany</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'france', 'France')">France</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'australia', 'Australia')">Australia</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'india', 'India')">India</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'singapore', 'Singapore')">Singapore</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'japan', 'Japan')">Japan</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'south korea', 'South Korea')">South Korea</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'netherlands', 'Netherlands')">Netherlands</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('countryDropdown', 'sweden', 'Sweden')">Sweden</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="city">City</label>
+                        <input type="text" id="city" placeholder="e.g., San Francisco, New York">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="keywords">Keywords</label>
+                        <input type="text" id="keywords" placeholder="Additional search terms">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="experienceLevel">Experience Level</label>
+                        <div class="dropdown" id="experienceLevelDropdown">
+                            <button type="button" class="dropdown-button" onclick="toggleDropdown('experienceLevelDropdown')">
+                                <span>Select Experience...</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <div class="dropdown-menu">
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', '', 'Any Experience')">Any Experience</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'entry', 'Entry Level')">Entry Level</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'junior', 'Junior')">Junior</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'mid', 'Mid-Level')">Mid-Level</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'senior', 'Senior')">Senior</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'lead', 'Lead')">Lead</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'manager', 'Manager')">Manager</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'director', 'Director')">Director</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'vp', 'Vice President')">Vice President</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('experienceLevelDropdown', 'executive', 'Executive')">Executive</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="companySize">Company Size</label>
+                        <div class="dropdown" id="companySizeDropdown">
+                            <button type="button" class="dropdown-button" onclick="toggleDropdown('companySizeDropdown')">
+                                <span>Select Company Size...</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <div class="dropdown-menu">
+                                <div class="dropdown-item" onclick="selectDropdownItem('companySizeDropdown', '', 'Any Size')">Any Size</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('companySizeDropdown', 'startup', 'Startup (1-10)')">Startup (1-10)</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('companySizeDropdown', 'small', 'Small (11-50)')">Small (11-50)</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('companySizeDropdown', 'medium', 'Medium (51-200)')">Medium (51-200)</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('companySizeDropdown', 'large', 'Large (201-1000)')">Large (201-1000)</div>
+                                <div class="dropdown-item" onclick="selectDropdownItem('companySizeDropdown', 'enterprise', 'Enterprise (1000+)')">Enterprise (1000+)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="maxResults">Max Results</label>
+                        <select id="maxResults">
+                            <option value="10">10 contacts</option>
+                            <option value="25">25 contacts</option>
+                            <option value="50" selected>50 contacts</option>
+                            <option value="100">100 contacts</option>
+                            <option value="200">200 contacts</option>
+                        </select>
+                    </div>
+
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableDedup" checked>
+                        <label for="enableDedup">Enable Smart Deduplication</label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dedupStrictness">Deduplication Level</label>
+                        <select id="dedupStrictness">
+                            <option value="loose">Loose - Keep more contacts</option>
+                            <option value="medium" selected>Medium - Balanced</option>
+                            <option value="strict">Strict - Maximum deduplication</option>
+                        </select>
+                    </div>
+
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="linkedinOnly">
+                        <label for="linkedinOnly">LinkedIn Only ⚠️</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="searchBtn">
+                        🚀 Search Contacts
+                    </button>
+
+                    <button type="button" class="btn btn-secondary" id="testBtn">
+                        🧪 Test Deduplication
+                    </button>
+                </form>
+
+                <!-- Status Display -->
+                <div id="statusDisplay"></div>
+            </div>
+
+            <!-- Results Panel -->
+            <div class="results-panel">
+                <div class="results-header">
+                    <h2>📊 Search Results</h2>
+                    <div class="results-count" id="resultsCount">0 contacts found</div>
+                </div>
+
+                <!-- Statistics -->
+                <div class="stats-grid" id="statsGrid" style="display: none;">
+                    <div class="stat-card">
+                        <span class="stat-number" id="totalContacts">0</span>
+                        <div class="stat-label">Total Contacts</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="duplicatesRemoved">0</span>
+                        <div class="stat-label">Duplicates Removed</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="averageConfidence">0%</span>
+                        <div class="stat-label">Avg Confidence</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="uniqueSources">0</span>
+                        <div class="stat-label">Unique Sources</div>
+                    </div>
+                </div>
+
+                <!-- Results Container -->
+                <div id="resultsContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔍</div>
+                        <h3>Ready to Find Contacts</h3>
+                        <p>Enter your search criteria and click "Search Contacts" to get started.</p>
+                    </div>
+                </div>
+
+                <!-- Search Summary (hidden by default) -->
+                <div class="search-summary" id="searchSummary" style="display: none;">
+                    <h4>🎯 Search Parameters</h4>
+                    <div class="search-params" id="searchParams"></div>
+                </div>
+
+                <!-- Table Container (hidden by default) -->
+                <div class="table-container" id="tableContainer" style="display: none;">
+                    <div class="table-header">
+                        <div class="table-title">📊 Contact Results</div>
+                        <div class="table-actions">
+                            <div class="view-toggle">
+                                <button class="active" onclick="switchView('table')">📋 Table</button>
+                                <button onclick="switchView('cards')">🎴 Cards</button>
+                            </div>
+                            <button class="btn-export" id="exportBtn" onclick="exportToCSV()" disabled>
+                                📥 Export CSV
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="table-wrapper">
+                        <table class="data-table" id="dataTable">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Position</th>
+                                    <th>Company</th>
+                                    <th>Location</th>
+                                    <th>Email</th>
+                                    <th>Phone</th>
+                                    <th>Confidence</th>
+                                    <th>Source</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <!-- Table content will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="table-pagination" id="tablePagination">
+                        <div class="pagination-info" id="paginationInfo">
+                            Showing 0 of 0 contacts
+                        </div>
+                        <div class="pagination-controls">
+                            <button class="pagination-btn" id="prevBtn" onclick="changePage(-1)" disabled>← Previous</button>
+                            <button class="pagination-btn" id="nextBtn" onclick="changePage(1)" disabled>Next →</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cards Container (hidden by default) -->
+                <div id="cardsContainer" style="display: none;">
+                    <!-- Card content will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>Built with ❤️ for professional networking • <a href="#" id="disclaimerBtn">Legal Disclaimer</a></p>
+        </div>
+    </div>
+
+    <!-- Modal for Disclaimer -->
+    <div class="modal" id="disclaimerModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal('disclaimerModal')">&times;</button>
+            <h3>⚖️ Legal Disclaimer</h3>
+            <div id="disclaimerContent">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Modal for Test Results -->
+    <div class="modal" id="testModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal('testModal')">&times;</button>
+            <h3>🧪 Deduplication Test Results</h3>
+            <div id="testContent">Loading...</div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = 'http://localhost:8000'; // Change this to your Render URL
+        let currentResults = [];
+        let currentStats = null;
+        let currentView = 'table';
+        let currentPage = 1;
+        let itemsPerPage = 25;
+        let dropdownData = {};
+
+        // DOM Elements
+        const searchForm = document.getElementById('searchForm');
+        const searchBtn = document.getElementById('searchBtn');
+        const testBtn = document.getElementById('testBtn');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const resultsCount = document.getElementById('resultsCount');
+        const statsGrid = document.getElementById('statsGrid');
+        const statusDisplay = document.getElementById('statusDisplay');
+        const tableContainer = document.getElementById('tableContainer');
+        const cardsContainer = document.getElementById('cardsContainer');
+        const searchSummary = document.getElementById('searchSummary');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAPIStatus();
+            loadDisclaimerData();
+            initializeDropdowns();
+            
+            // Event listeners
+            searchForm.addEventListener('submit', handleSearch);
+            testBtn.addEventListener('click', runDeduplicationTest);
+            document.getElementById('disclaimerBtn').addEventListener('click', () => showModal('disclaimerModal'));
+            
+            // Close dropdowns when clicking outside
+            document.addEventListener('click', function(event) {
+                if (!event.target.closest('.dropdown')) {
+                    closeAllDropdowns();
+                }
+            });
+        });
+
+        // Dropdown Functions
+        function initializeDropdowns() {
+            dropdownData = {
+                industryDropdown: '',
+                positionDropdown: '',
+                countryDropdown: '',
+                experienceLevelDropdown: '',
+                companySizeDropdown: ''
+            };
+        }
+
+        function toggleDropdown(dropdownId) {
+            const dropdown = document.getElementById(dropdownId);
+            const menu = dropdown.querySelector('.dropdown-menu');
+            const button = dropdown.querySelector('.dropdown-button');
+            
+            // Close other dropdowns
+            closeAllDropdowns(dropdownId);
+            
+            // Toggle current dropdown
+            const isOpen = menu.classList.contains('show');
+            
+            if (isOpen) {
+                menu.classList.remove('show');
+                button.classList.remove('active');
+            } else {
+                menu.classList.add('show');
+                button.classList.add('active');
+                
+                // Focus search input if exists
+                const searchInput = menu.querySelector('.dropdown-search');
+                if (searchInput) {
+                    setTimeout(() => searchInput.focus(), 100);
+                }
+            }
+        }
+
+        function closeAllDropdowns(exceptId = null) {
+            const dropdowns = document.querySelectorAll('.dropdown');
+            dropdowns.forEach(dropdown => {
+                if (dropdown.id !== exceptId) {
+                    const menu = dropdown.querySelector('.dropdown-menu');
+                    const button = dropdown.querySelector('.dropdown-button');
+                    menu.classList.remove('show');
+                    button.classList.remove('active');
+                }
+            });
+        }
+
+        function selectDropdownItem(dropdownId, value, displayText) {
+            const dropdown = document.getElementById(dropdownId);
+            const button = dropdown.querySelector('.dropdown-button span:first-child');
+            const menu = dropdown.querySelector('.dropdown-menu');
+            
+            button.textContent = displayText;
+            dropdownData[dropdownId] = value;
+            
+            // Remove previous selections
+            dropdown.querySelectorAll('.dropdown-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // Add selection to clicked item
+            event.target.classList.add('selected');
+            
+            // Close dropdown
+            menu.classList.remove('show');
+            dropdown.querySelector('.dropdown-button').classList.remove('active');
+        }
+
+        function filterDropdown(dropdownId, searchTerm) {
+            const dropdown = document.getElementById(dropdownId);
+            const items = dropdown.querySelectorAll('.dropdown-item');
+            
+            searchTerm = searchTerm.toLowerCase();
+            
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // API Functions
+        async function apiRequest(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error('API Request failed:', error);
+                throw error;
+            }
+        }
+
+        async function checkAPIStatus() {
+            try {
+                const status = await apiRequest('/health');
+                showStatus('success', `✅ API Connected - ${status.status}`);
+            } catch (error) {
+                showStatus('warning', `⚠️ API Connection Failed: ${error.message}`);
+            }
+        }
+
+        async function handleSearch(event) {
+            event.preventDefault();
+            
+            const searchParams = {
+                industry: dropdownData.industryDropdown,
+                position: dropdownData.positionDropdown,
+                company: document.getElementById('company').value,
+                country: dropdownData.countryDropdown,
+                city: document.getElementById('city').value,
+                keywords: document.getElementById('keywords').value,
+                experience_level: dropdownData.experienceLevelDropdown,
+                company_size: dropdownData.companySizeDropdown,
+                max_results: parseInt(document.getElementById('maxResults').value),
+                enable_deduplication: document.getElementById('enableDedup').checked,
+                dedup_strictness: document.getElementById('dedupStrictness').value
+            };
+
+            // Remove empty fields
+            Object.keys(searchParams).forEach(key => {
+                if (searchParams[key] === '' || searchParams[key] === null) {
+                    delete searchParams[key];
+                }
+            });
+
+            try {
+                setLoading(true);
+                showStatus('info', '🔍 Searching for contacts...');
+
+                const endpoint = document.getElementById('linkedinOnly').checked ? '/search/linkedin' : '/search';
+                const results = await apiRequest(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify(searchParams)
+                });
+
+                currentResults = results.contacts || [];
+                currentStats = results.dedup_stats || null;
+
+                displaySearchSummary(searchParams);
+                displayResults(currentResults);
+                updateStatistics(results);
+                
+                if (results.success) {
+                    showStatus('success', `✅ Found ${currentResults.length} contacts`);
+                } else {
+                    showStatus('warning', `⚠️ ${results.message}`);
+                }
+
+            } catch (error) {
+                showStatus('error', `❌ Search failed: ${error.message}`);
+                displayResults([]);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function runDeduplicationTest() {
+            try {
+                showStatus('info', '🧪 Running deduplication test...');
+                const testResults = await apiRequest('/deduplicate/test');
+                
+                document.getElementById('testContent').innerHTML = formatTestResults(testResults);
+                showModal('testModal');
+                
+                showStatus('success', '✅ Deduplication test completed');
+            } catch (error) {
+                showStatus('error', `❌ Test failed: ${error.message}`);
+            }
+        }
+
+        async function loadDisclaimerData() {
+            try {
+                const disclaimer = await apiRequest('/legal/disclaimer');
+                document.getElementById('disclaimerContent').innerHTML = formatDisclaimer(disclaimer);
+            } catch (error) {
+                document.getElementById('disclaimerContent').innerHTML = 
+                    '<p>Could not load legal disclaimer. Please ensure you comply with all applicable laws and website terms of service.</p>';
+            }
+        }
+
+        // Display Functions
+        function displaySearchSummary(searchParams) {
+            const searchParamsDiv = document.getElementById('searchParams');
+            const params = [];
+            
+            if (searchParams.industry) params.push(`Industry: ${searchParams.industry}`);
+            if (searchParams.position) params.push(`Position: ${searchParams.position}`);
+            if (searchParams.company) params.push(`Company: ${searchParams.company}`);
+            if (searchParams.country) params.push(`Country: ${searchParams.country}`);
+            if (searchParams.city) params.push(`City: ${searchParams.city}`);
+            if (searchParams.keywords) params.push(`Keywords: ${searchParams.keywords}`);
+            if (searchParams.experience_level) params.push(`Experience: ${searchParams.experience_level}`);
+            if (searchParams.company_size) params.push(`Company Size: ${searchParams.company_size}`);
+            
+            params.push(`Max Results: ${searchParams.max_results}`);
+            params.push(`Deduplication: ${searchParams.enable_deduplication ? searchParams.dedup_strictness : 'disabled'}`);
+            
+            searchParamsDiv.innerHTML = params.map(param => 
+                `<div class="search-param">${param}</div>`
+            ).join('');
+            
+            searchSummary.style.display = 'block';
+        }
+
+        function displayResults(contacts) {
+            resultsCount.textContent = `${contacts.length} contacts found`;
+            
+            if (contacts.length === 0) {
+                hideResultsContainers();
+                resultsContainer.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <h3>No Contacts Found</h3>
+                        <p>Try adjusting your search criteria or reducing deduplication strictness.</p>
+                    </div>
+                `;
+                statsGrid.style.display = 'none';
+                return;
+            }
+
+            // Show appropriate view
+            if (currentView === 'table') {
+                displayTableView(contacts);
+            } else {
+                displayCardsView(contacts);
+            }
+            
+            statsGrid.style.display = 'grid';
+            document.getElementById('exportBtn').disabled = false;
+        }
+
+        function hideResultsContainers() {
+            tableContainer.style.display = 'none';
+            cardsContainer.style.display = 'none';
+            resultsContainer.style.display = 'block';
+        }
+
+        function displayTableView(contacts) {
+            resultsContainer.style.display = 'none';
+            cardsContainer.style.display = 'none';
+            tableContainer.style.display = 'block';
+            
+            const tableBody = document.getElementById('tableBody');
+            
+            // Calculate pagination
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const paginatedContacts = contacts.slice(startIndex, endIndex);
+            
+            // Generate table rows
+            const tableHTML = paginatedContacts.map(contact => createTableRow(contact)).join('');
+            tableBody.innerHTML = tableHTML;
+            
+            // Update pagination
+            updatePagination(contacts.length);
+        }
+
+        function displayCardsView(contacts) {
+            resultsContainer.style.display = 'none';
+            tableContainer.style.display = 'none';
+            cardsContainer.style.display = 'block';
+            
+            // Calculate pagination
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const paginatedContacts = contacts.slice(startIndex, endIndex);
+            
+            const contactsHTML = paginatedContacts.map(contact => createContactCard(contact)).join('');
+            cardsContainer.innerHTML = `<div class="contact-grid">${contactsHTML}</div>`;
+        }
+
+        function createTableRow(contact) {
+            const confidence = Math.round(contact.confidence_score * 100);
+            const confidenceClass = confidence >= 80 ? 'high' : confidence >= 50 ? 'medium' : 'low';
+            
+            return `
+                <tr>
+                    <td><strong>${escapeHtml(contact.name || 'Unknown')}</strong></td>
+                    <td>${escapeHtml(contact.position || 'N/A')}</td>
+                    <td>${escapeHtml(contact.company || 'N/A')}</td>
+                    <td>${escapeHtml(contact.location || 'N/A')}</td>
+                    <td>${contact.email ? `<a href="mailto:${contact.email}" style="color: #e91e63;">${escapeHtml(contact.email)}</a>` : 'N/A'}</td>
+                    <td>${escapeHtml(contact.phone || 'N/A')}</td>
+                    <td class="confidence-cell">
+                        <div class="confidence-bar">
+                            <div class="confidence-fill ${confidenceClass}" style="width: ${confidence}%"></div>
+                            <div class="confidence-text">${confidence}%</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="source-badge">${escapeHtml(contact.source || 'Unknown')}</div>
+                    </td>
+                    <td>
+                        <div class="action-links">
+                            ${contact.linkedin_url ? `
+                                <a href="${contact.linkedin_url}" target="_blank" class="action-link linkedin">
+                                    💼 LinkedIn
+                                </a>
+                            ` : ''}
+                            ${contact.email ? `
+                                <a href="mailto:${contact.email}" class="action-link email">
+                                    ✉️ Email
+                                </a>
+                            ` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        function createContactCard(contact) {
+            const confidence = Math.round(contact.confidence_score * 100);
+            const confidenceClass = confidence >= 80 ? 'high' : confidence >= 50 ? 'medium' : 'low';
+            
+            return `
+                <div class="contact-card">
+                    <div class="contact-header">
+                        <h3 class="contact-name">${escapeHtml(contact.name || 'Unknown')}</h3>
+                        <div class="confidence-badge ${confidenceClass}">${confidence}%</div>
+                    </div>
+                    
+                    ${contact.position ? `
+                        <div class="contact-info">
+                            <strong>Position:</strong> <span>${escapeHtml(contact.position)}</span>
+                        </div>
+                    ` : ''}
+                    
+                    ${contact.company ? `
+                        <div class="contact-info">
+                            <strong>Company:</strong> <span>${escapeHtml(contact.company)}</span>
+                        </div>
+                    ` : ''}
+                    
+                    ${contact.location ? `
+                        <div class="contact-info">
+                            <strong>Location:</strong> <span>${escapeHtml(contact.location)}</span>
+                        </div>
+                    ` : ''}
+                    
+                    ${contact.industry ? `
+                        <div class="contact-info">
+                            <strong>Industry:</strong> <span>${escapeHtml(contact.industry)}</span>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="contact-links">
+                        ${contact.linkedin_url ? `
+                            <a href="${contact.linkedin_url}" target="_blank" class="contact-link linkedin-link">
+                                💼 LinkedIn
+                            </a>
+                        ` : ''}
+                        
+                        ${contact.email ? `
+                            <a href="mailto:${contact.email}" class="contact-link email-link">
+                                ✉️ Email
+                            </a>
+                        ` : ''}
+                    </div>
+                    
+                    ${contact.source ? `
+                        <div class="source-tag">${escapeHtml(contact.source)}</div>
+                    ` : ''}
+                    
+                    ${contact.summary ? `
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; font-size: 0.9rem; color: #666;">
+                            ${escapeHtml(contact.summary)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function updatePagination(totalItems) {
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            const startItem = (currentPage - 1) * itemsPerPage + 1;
+            const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+            
+            document.getElementById('paginationInfo').textContent = 
+                `Showing ${startItem}-${endItem} of ${totalItems} contacts`;
+            
+            document.getElementById('prevBtn').disabled = currentPage <= 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        }
+
+        function changePage(direction) {
+            const totalPages = Math.ceil(currentResults.length / itemsPerPage);
+            const newPage = currentPage + direction;
+            
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                displayResults(currentResults);
+            }
+        }
+
+        function switchView(view) {
+            currentView = view;
+            currentPage = 1; // Reset to first page
+            
+            // Update toggle buttons
+            document.querySelectorAll('.view-toggle button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Display results in new view
+            if (currentResults.length > 0) {
+                displayResults(currentResults);
+            }
+        }
+
+        // CSV Export Function
+        function exportToCSV() {
+            if (currentResults.length === 0) {
+                showStatus('warning', '⚠️ No data to export');
+                return;
+            }
+
+            try {
+                showStatus('info', '📥 Preparing CSV export...');
+                
+                // Define CSV headers
+                const headers = [
+                    'Name',
+                    'Position',
+                    'Company',
+                    'Location',
+                    'Email',
+                    'Phone',
+                    'LinkedIn URL',
+                    'Industry',
+                    'Confidence Score',
+                    'Source',
+                    'Summary',
+                    'Scraped At'
+                ];
+
+                // Convert data to CSV format
+                const csvData = currentResults.map(contact => [
+                    contact.name || '',
+                    contact.position || '',
+                    contact.company || '',
+                    contact.location || '',
+                    contact.email || '',
+                    contact.phone || '',
+                    contact.linkedin_url || '',
+                    contact.industry || '',
+                    Math.round((contact.confidence_score || 0) * 100) + '%',
+                    contact.source || '',
+                    (contact.summary || '').replace(/"/g, '""'), // Escape quotes
+                    contact.scraped_at || ''
+                ]);
+
+                // Add headers to data
+                csvData.unshift(headers);
+
+                // Convert to CSV string
+                const csvString = csvData.map(row => 
+                    row.map(field => `"${field}"`).join(',')
+                ).join('\n');
+
+                // Create and download file
+                const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                
+                if (navigator.msSaveBlob) { // IE 10+
+                    navigator.msSaveBlob(blob, 'contacts.csv');
+                } else {
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `contacts_${new Date().toISOString().split('T')[0]}.csv`;
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+
+                showStatus('success', `✅ CSV exported successfully (${currentResults.length} contacts)`);
+
+            } catch (error) {
+                console.error('CSV export failed:', error);
+                showStatus('error', `❌ Export failed: ${error.message}`);
+            }
+        }
+
+        function updateStatistics(results) {
+            document.getElementById('totalContacts').textContent = results.total_results || 0;
+            
+            if (currentStats) {
+                document.getElementById('duplicatesRemoved').textContent = currentStats.duplicates_removed || 0;
+            } else {
+                document.getElementById('duplicatesRemoved').textContent = 'N/A';
+            }
+            
+            if (currentResults.length > 0) {
+                const avgConfidence = currentResults.reduce((sum, contact) => sum + contact.confidence_score, 0) / currentResults.length;
+                document.getElementById('averageConfidence').textContent = Math.round(avgConfidence * 100) + '%';
+                
+                const uniqueSources = new Set(currentResults.map(c => c.source).filter(Boolean)).size;
+                document.getElementById('uniqueSources').textContent = uniqueSources;
+            } else {
+                document.getElementById('averageConfidence').textContent = '0%';
+                document.getElementById('uniqueSources').textContent = '0';
+            }
+        }
+
+        function setLoading(isLoading) {
+            searchBtn.disabled = isLoading;
+            if (isLoading) {
+                searchBtn.classList.add('loading');
+                searchBtn.textContent = '';
+                hideResultsContainers();
+                resultsContainer.innerHTML = `
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Searching for contacts...</p>
+                    </div>
+                `;
+                resultsContainer.style.display = 'block';
+            } else {
+                searchBtn.classList.remove('loading');
+                searchBtn.textContent = '🚀 Search Contacts';
+            }
+        }
+
+        function showStatus(type, message) {
+            const alertClass = `alert-${type === 'error' ? 'warning' : type}`;
+            statusDisplay.innerHTML = `
+                <div class="alert ${alertClass}" style="margin-top: 20px;">
+                    ${message}
+                </div>
+            `;
+            
+            setTimeout(() => {
+                statusDisplay.innerHTML = '';
+            }, 5000);
+        }
+
+        function showModal(modalId) {
+            document.getElementById(modalId).classList.add('show');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function formatTestResults(testData) {
+            return `
+                <p><strong>Test Description:</strong> ${testData.test_description}</p>
+                
+                <h4>Results by Strictness Level:</h4>
+                <div style="margin: 20px 0;">
+                    ${Object.entries(testData.results_by_strictness).map(([level, data]) => `
+                        <div style="background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                            <h5 style="color: #e91e63; margin-bottom: 10px;">${level.toUpperCase()}</h5>
+                            <p><strong>Original:</strong> ${data.original_count} contacts</p>
+                            <p><strong>After Deduplication:</strong> ${data.deduplicated_count} contacts</p>
+                            <p><strong>Removed:</strong> ${data.duplicates_removed} duplicates (${data.duplicate_rate}%)</p>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <h4>Recommendations:</h4>
+                <ul>
+                    ${Object.entries(testData.recommendations).map(([level, rec]) => 
+                        `<li><strong>${level}:</strong> ${rec}</li>`
+                    ).join('')}
+                </ul>
+            `;
+        }
+
+        function formatDisclaimer(disclaimer) {
+            return `
+                <div class="alert alert-warning">
+                    <h4>${disclaimer.disclaimer}</h4>
+                    <p>${disclaimer.message}</p>
+                </div>
+                
+                ${disclaimer.linkedin_warning ? `
+                    <div class="alert alert-info">
+                        <h4>LinkedIn Specific Notice</h4>
+                        <p><strong>Warning:</strong> ${disclaimer.linkedin_warning.notice}</p>
+                        <p><strong>Recommendation:</strong> ${disclaimer.linkedin_warning.recommendation}</p>
+                        <p><strong>API URL:</strong> <a href="${disclaimer.linkedin_warning.api_url}" target="_blank">${disclaimer.linkedin_warning.api_url}</a></p>
+                    </div>
+                ` : ''}
+                
+                <h4>General Guidelines:</h4>
+                <ul>
+                    ${disclaimer.general_guidelines.map(guideline => `<li>${guideline}</li>`).join('')}
+                </ul>
+                
+                <div class="alert alert-warning" style="margin-top: 20px;">
+                    <p><strong>User Responsibility:</strong> ${disclaimer.user_responsibility}</p>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close modals when clicking outside
+        window.addEventListener('click', function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.classList.remove('show');
+            }
+        });
+    </script>
+</body>
+</html>
