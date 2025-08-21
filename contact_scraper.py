@@ -2497,12 +2497,11 @@ async def get_search_status(search_id: str):
     return search_results[search_id]
 
 if __name__ == "__main__":
-    # Run the API server
     uvicorn.run(
-        "main:app",  # Replace "main" with your filename
+        app,  # Use app directly, not "main:app"
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=PORT,
+        reload=False,  # Disable in production
         log_level="info"
     )
 
