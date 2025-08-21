@@ -39,7 +39,7 @@ COPY requirements.txt .
 RUN python3 -m pip install --upgrade pip && \
     python3 -m pip install --no-cache-dir -r requirements.txt
 
-# Copy your application (contact_scraper.py)
+# Copy your application
 COPY contact_scraper.py .
 
 # Create non-root user for security
@@ -50,5 +50,5 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Run YOUR application (contact_scraper.py not main.py)
-CMD ["python3", "-m", "uvicorn", "contact_scraper:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run your application - let Python handle the PORT
+CMD ["python3", "contact_scraper.py"]
