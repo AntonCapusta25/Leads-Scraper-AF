@@ -1,0 +1,10 @@
+[phases.setup]
+nixPkgs = ["python39", "chromium"]
+
+[phases.install]
+cmds = [
+    "pip install -r requirements.txt"
+]
+
+[start]
+cmd = "python3 contact_scraper.py"
