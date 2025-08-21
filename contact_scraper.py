@@ -26,10 +26,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
-# ⭐ ADD THESE LINES RIGHT HERE ⭐
-import os
-
 # Railway environment configuration
+import os
 PORT = int(os.getenv("PORT", 8000))
 RAILWAY_ENV = os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
 
@@ -38,10 +36,6 @@ logging.basicConfig(
     level=getattr(logging, os.getenv("LOG_LEVEL", "INFO")),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -245,102 +239,147 @@ class ContactScraper:
             logger.error("Install with: pip install DrissionPage")
             return None, None, None, False
     
-# Fix for line 249 - just replace this method in your original code:
-
-def _create_stealth_options(self):
-    """Create enhanced stealth browser options for Railway"""
-    ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
-    
-    if not available:
-        return None
+    def _create_stealth_options(self):
+        """Create enhanced stealth browser options for Railway"""
+        ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
         
-    try:
-        co = ChromiumOptions()
-        
-        # Railway Chrome detection
-        chrome_found = False
-        
-        # Try environment variables first
-        chrome_env_path = os.getenv('CHROME_BIN') or os.getenv('CHROMIUM_PATH')
-        if chrome_env_path:
-            # Handle wildcard paths
-            if '*' in chrome_env_path:
-                import glob
-                matches = glob.glob(chrome_env_path)
-                if matches:
-                    actual_path = matches[0]
-                    if os.path.exists(actual_path):
-                        co.set_browser_path(actual_path)
-                        chrome_found = True
-                        logger.info(f"✅ Found Chrome via env var: {actual_path}")
-            elif os.path.exists(chrome_env_path):
-                co.set_browser_path(chrome_env_path)
-                chrome_found = True
-                logger.info(f"✅ Found Chrome via env var: {chrome_env_path}")
-        
-        # Try standard paths if env vars don't work
-        if not chrome_found:
-            chrome_paths = [
-                '/nix/store/*/bin/chromium',      # Railway/Nix
-                '/usr/bin/chromium',              # Standard
-                '/usr/bin/chromium-browser',      # Alternative
-                '/usr/bin/google-chrome-stable',  # Google Chrome
-            ]
+        if not available:
+            return None
             
-            for path in chrome_paths:
-                if '*' in path:
+        try:
+            co = ChromiumOptions()
+            
+            # Railway Chrome detection
+            chrome_found = False
+            
+            # Try environment variables first
+            chrome_env_path = os.getenv('CHROME_BIN') or os.getenv('CHROMIUM_PATH')
+            if chrome_env_path:
+                # Handle wildcard paths
+                if '*' in chrome_env_path:
                     import glob
-                    matches = glob.glob(path)
+                    matches = glob.glob(chrome_env_path)
                     if matches:
                         actual_path = matches[0]
                         if os.path.exists(actual_path):
                             co.set_browser_path(actual_path)
                             chrome_found = True
-                            logger.info(f"✅ Found Chrome: {actual_path}")
-                            break
-                elif os.path.exists(path):
-                    co.set_browser_path(path)
+                            logger.info(f"✅ Found Chrome via env var: {actual_path}")
+                elif os.path.exists(chrome_env_path):
+                    co.set_browser_path(chrome_env_path)
                     chrome_found = True
-                    logger.info(f"✅ Found Chrome: {path}")
-                    break
+                    logger.info(f"✅ Found Chrome via env var: {chrome_env_path}")
+            
+            # Try standard paths if env vars don't work
+            if not chrome_found:
+                chrome_paths = [
+                    '/nix/store/*/bin/chromium',      # Railway/Nix
+                    '/usr/bin/chromium',              # Standard
+                    '/usr/bin/chromium-browser',      # Alternative
+                    '/usr/bin/google-chrome-stable',  # Google Chrome
+                ]
+                
+                for path in chrome_paths:
+                    if '*' in path:
+                        import glob
+                        matches = glob.glob(path)
+                        if matches:
+                            actual_path = matches[0]
+                            if os.path.exists(actual_path):
+                                co.set_browser_path(actual_path)
+                                chrome_found = True
+                                logger.info(f"✅ Found Chrome: {actual_path}")
+                                break
+                    elif os.path.exists(path):
+                        co.set_browser_path(path)
+                        chrome_found = True
+                        logger.info(f"✅ Found Chrome: {path}")
+                        break
+            
+            if not chrome_found:
+                logger.warning("⚠️ Chrome not found - letting DrissionPage auto-detect")
+            
+            # Railway-optimized arguments
+            if self.headless:
+                co.set_argument('--headless=new')
+            
+            railway_args = [
+                '--no-sandbox',                    # Required for Railway
+                '--disable-dev-shm-usage',         # Required for Railway
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-extensions',
+                '--disable-plugins', 
+                '--disable-images',
+                '--no-first-run',
+                '--disable-infobars',
+                '--disable-notifications',
+                '--disable-popup-blocking',
+                '--disable-automation',
+                '--disable-blink-features=AutomationControlled',
+                '--window-size=1920,1080',
+                '--user-agent=' + random.choice(self.user_agents)
+            ]
+            
+            for arg in railway_args:
+                co.set_argument(arg)
+            
+            # Set temp directory
+            co.set_user_data_path(f'/tmp/chrome_{uuid.uuid4().hex[:8]}')
+            
+            return co
+            
+        except Exception as e:
+            logger.error(f"❌ Chrome options failed: {e}")
+            return None
+
+    async def _create_browser(self):
+        """Create browser instance with enhanced error handling"""
+        try:
+            if self._browser_created:
+                return True
+            
+            ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
+            
+            if not available:
+                logger.error("❌ DrissionPage not available - cannot create browser")
+                return False
+            
+            # Create browser options
+            options = self._create_stealth_options()
+            if not options:
+                logger.error("❌ Failed to create browser options")
+                return False
+            
+            # Create browser page
+            logger.info("🌐 Creating browser instance...")
+            self.browser_page = ChromiumPage(addr_or_opts=options)
+            
+            # Test browser
+            await asyncio.sleep(1)
+            self.browser_page.get("https://httpbin.org/user-agent")
+            await asyncio.sleep(2)
+            
+            self._browser_created = True
+            logger.info("✅ Browser created successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Browser creation failed: {e}")
+            self.browser_page = None
+            self._browser_created = False
+            return False
+    
+    async def _rate_limit(self):
+        """Apply standard rate limiting"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
         
-        if not chrome_found:
-            logger.warning("⚠️ Chrome not found - letting DrissionPage auto-detect")
+        if time_since_last < self.min_delay:
+            sleep_time = self.min_delay - time_since_last + random.uniform(0.5, 1.5)
+            await asyncio.sleep(sleep_time)
         
-        # Railway-optimized arguments
-        if self.headless:
-            co.set_argument('--headless=new')
-        
-        railway_args = [
-            '--no-sandbox',                    # Required for Railway
-            '--disable-dev-shm-usage',         # Required for Railway
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-extensions',
-            '--disable-plugins', 
-            '--disable-images',
-            '--no-first-run',
-            '--disable-infobars',
-            '--disable-notifications',
-            '--disable-popup-blocking',
-            '--disable-automation',
-            '--disable-blink-features=AutomationControlled',
-            '--window-size=1920,1080',
-            '--user-agent=' + random.choice(self.user_agents)
-        ]
-        
-        for arg in railway_args:
-            co.set_argument(arg)
-        
-        # Set temp directory
-        import uuid
-        co.set_user_data_path(f'/tmp/chrome_{uuid.uuid4().hex[:8]}')
-        
-        return co
-        
-    except Exception as e:
-        logger.error(f"❌ Chrome options failed: {e}")
-        return None
+        self.last_request_time = time.time()
     
     async def _rate_limit_linkedin(self):
         """Apply enhanced rate limiting for LinkedIn"""
@@ -2070,7 +2109,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ⭐ UPDATE YOUR EXISTING CORS MIDDLEWARE ⭐
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -2100,20 +2139,6 @@ async def shutdown_event():
     await scraper.close()
     logger.info("👋 Contact Scraper API shutting down...")
 
-@app.get("/")
-async def root():
-    """API root endpoint"""
-    return {
-        "message": "Contact & People Scraper API",
-        "version": "1.0.0",
-        "status": "active",
-        "endpoints": {
-            "search": "/search",
-            "health": "/health",
-            "docs": "/docs"
-        }
-    }
-    
 @app.get("/")
 async def root():
     """Railway health check endpoint"""
@@ -2496,34 +2521,359 @@ async def get_search_status(search_id: str):
     
     return search_results[search_id]
 
+@app.get("/api/stats")
+async def get_api_stats():
+    """Get API usage statistics"""
+    return {
+        "linkedin_requests": scraper.linkedin_request_count,
+        "linkedin_limit": scraper.linkedin_max_requests_per_hour,
+        "browser_status": "active" if scraper._browser_created else "inactive",
+        "dedup_strictness": scraper.dedup_strictness,
+        "background_searches": len(search_results),
+        "uptime": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
+
+@app.get("/api/clear-cache")
+async def clear_cache():
+    """Clear background search cache"""
+    global search_results
+    old_count = len(search_results)
+    search_results = {}
+    
+    return {
+        "success": True,
+        "message": f"Cleared {old_count} cached search results",
+        "remaining_results": len(search_results)
+    }
+
+@app.post("/api/test-browser")
+async def test_browser():
+    """Test browser functionality"""
+    try:
+        success = await scraper._create_browser()
+        
+        if success:
+            # Test basic functionality
+            scraper.browser_page.get("https://httpbin.org/user-agent")
+            user_agent = scraper.browser_page.html
+            
+            return {
+                "success": True,
+                "message": "Browser test successful",
+                "browser_created": scraper._browser_created,
+                "test_url": "https://httpbin.org/user-agent",
+                "response_length": len(user_agent) if user_agent else 0
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Browser creation failed",
+                "browser_created": False
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Browser test failed: {str(e)}",
+            "browser_created": scraper._browser_created
+        }
+
+@app.get("/api/browser/restart")
+async def restart_browser():
+    """Restart browser instance"""
+    try:
+        # Close existing browser
+        await scraper.close()
+        
+        # Create new browser
+        success = await scraper._create_browser()
+        
+        return {
+            "success": success,
+            "message": "Browser restarted successfully" if success else "Browser restart failed",
+            "browser_status": "active" if success else "inactive"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Browser restart failed: {str(e)}",
+            "browser_status": "error"
+        }
+
+# Advanced search endpoints
+@app.post("/search/advanced")
+async def advanced_search(request: SearchRequest):
+    """
+    Advanced search with enhanced filtering and processing
+    """
+    try:
+        logger.info(f"🔍 Advanced search requested: {request}")
+        
+        # Convert request to search parameters
+        search_params = SearchParameters(
+            industry=request.industry,
+            position=request.position,
+            company=request.company,
+            country=request.country,
+            city=request.city,
+            keywords=request.keywords,
+            experience_level=request.experience_level,
+            company_size=request.company_size,
+            max_results=request.max_results
+        )
+        
+        # Perform search with enhanced processing
+        results = await scraper.search_contacts(search_params, request.enable_deduplication)
+        
+        # Enhanced result processing
+        enhanced_results = []
+        for contact in results:
+            # Add email pattern generation
+            if contact.name and contact.company and not contact.email:
+                email_patterns = scraper._generate_email_patterns(contact.name, contact.company)
+                contact.summary = f"Suggested emails: {', '.join(email_patterns[:3])}"
+            
+            enhanced_results.append(contact)
+        
+        # Generate search analytics
+        analytics = {
+            "source_breakdown": {},
+            "confidence_stats": {
+                "high": len([c for c in enhanced_results if c.confidence_score >= 0.8]),
+                "medium": len([c for c in enhanced_results if 0.5 <= c.confidence_score < 0.8]),
+                "low": len([c for c in enhanced_results if c.confidence_score < 0.5])
+            },
+            "data_completeness": {
+                "with_email": len([c for c in enhanced_results if c.email]),
+                "with_phone": len([c for c in enhanced_results if c.phone]),
+                "with_linkedin": len([c for c in enhanced_results if c.linkedin_url]),
+                "with_location": len([c for c in enhanced_results if c.location])
+            }
+        }
+        
+        # Count by source
+        for contact in enhanced_results:
+            source = contact.source or "Unknown"
+            analytics["source_breakdown"][source] = analytics["source_breakdown"].get(source, 0) + 1
+        
+        # Convert results to response format
+        contact_responses = [
+            ContactResponse(**asdict(contact)) for contact in enhanced_results
+        ]
+        
+        return {
+            "success": True,
+            "message": f"Advanced search completed. Found {len(enhanced_results)} contacts",
+            "total_results": len(enhanced_results),
+            "contacts": contact_responses,
+            "search_params": asdict(search_params),
+            "analytics": analytics,
+            "search_quality": {
+                "avg_confidence": sum(c.confidence_score for c in enhanced_results) / len(enhanced_results) if enhanced_results else 0,
+                "data_richness": sum(1 for c in enhanced_results if any([c.email, c.phone, c.linkedin_url])) / len(enhanced_results) if enhanced_results else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Advanced search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Advanced search failed: {str(e)}")
+
+# Export endpoints
+@app.post("/export/csv")
+async def export_contacts_csv(contacts: List[ContactResponse]):
+    """
+    Export contacts to CSV format
+    """
+    try:
+        import csv
+        import io
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=[
+            'name', 'position', 'company', 'location', 'email', 'phone',
+            'linkedin_url', 'industry', 'source', 'confidence_score'
+        ])
+        
+        writer.writeheader()
+        for contact in contacts:
+            writer.writerow({
+                'name': contact.name,
+                'position': contact.position or '',
+                'company': contact.company or '',
+                'location': contact.location or '',
+                'email': contact.email or '',
+                'phone': contact.phone or '',
+                'linkedin_url': contact.linkedin_url or '',
+                'industry': contact.industry or '',
+                'source': contact.source or '',
+                'confidence_score': contact.confidence_score
+            })
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        return {
+            "success": True,
+            "format": "csv",
+            "content": csv_content,
+            "records_exported": len(contacts),
+            "filename": f"contacts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSV export failed: {str(e)}")
+
+@app.post("/export/json")
+async def export_contacts_json(contacts: List[ContactResponse]):
+    """
+    Export contacts to JSON format
+    """
+    try:
+        export_data = {
+            "export_info": {
+                "timestamp": datetime.now().isoformat(),
+                "total_contacts": len(contacts),
+                "format": "json",
+                "version": "1.0.0"
+            },
+            "contacts": [contact.dict() for contact in contacts]
+        }
+        
+        return {
+            "success": True,
+            "format": "json",
+            "data": export_data,
+            "records_exported": len(contacts),
+            "filename": f"contacts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"JSON export failed: {str(e)}")
+
+# Validation endpoints
+@app.post("/validate/email")
+async def validate_email_patterns(contact: ContactResponse):
+    """
+    Generate and validate email patterns for a contact
+    """
+    try:
+        if not contact.name or not contact.company:
+            raise HTTPException(status_code=400, detail="Name and company required for email pattern generation")
+        
+        # Convert to ContactResult for processing
+        contact_result = ContactResult(**contact.dict())
+        
+        # Generate email patterns
+        email_patterns = scraper._generate_email_patterns(contact.name, contact.company)
+        
+        # Basic email format validation
+        import re
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        valid_patterns = [email for email in email_patterns if re.match(email_regex, email)]
+        
+        return {
+            "success": True,
+            "contact_name": contact.name,
+            "company": contact.company,
+            "generated_patterns": email_patterns,
+            "valid_patterns": valid_patterns,
+            "pattern_count": len(valid_patterns),
+            "confidence": "medium" if len(valid_patterns) > 3 else "low"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email validation failed: {str(e)}")
+
 if __name__ == "__main__":
+    # Run the API server
     uvicorn.run(
-        app,  # Use app directly, not "main:app"
+        app,
         host="0.0.0.0",
         port=PORT,
         reload=False,  # Disable in production
         log_level="info"
     )
 
-# Example usage:
+# Example usage and API documentation:
 """
-# Install dependencies:
+PROFESSIONAL CONTACT & PEOPLE SCRAPER API
+
+🚀 Features:
+- Multi-source contact scraping (Google, LinkedIn, Business Directories, Company Websites)
+- Advanced deduplication with fuzzy matching
+- LinkedIn integration with ToS compliance warnings
+- Railway deployment optimized
+- Real-time browser automation with stealth features
+- Comprehensive API with multiple endpoints
+
+📋 Main Endpoints:
+- POST /search - Main contact search
+- POST /search/linkedin - LinkedIn-only search (use responsibly)
+- POST /search/async - Background search for large requests
+- POST /deduplicate - Advanced contact deduplication
+- POST /search/advanced - Enhanced search with analytics
+- GET /health - Health check
+- GET /legal/disclaimer - Legal information
+
+🔧 Advanced Features:
+- Rate limiting and stealth browsing
+- Email pattern generation
+- Confidence scoring
+- Source attribution
+- Background search processing
+- CSV/JSON export capabilities
+- Browser management endpoints
+
+⚖️ Legal Compliance:
+- LinkedIn ToS warnings and compliance features
+- Rate limiting to respect target sites
+- Public data only extraction
+- User responsibility disclaimers
+
+🚀 Installation:
 pip install DrissionPage fastapi uvicorn python-multipart
 
-# Run the server:
-python main.py
+🔗 Example Usage:
+curl -X POST "https://your-railway-app.railway.app/search" \
+-H "Content-Type: application/json" \
+-d '{
+    "position": "Software Engineer",
+    "company": "Google",
+    "country": "United States",
+    "max_results": 10,
+    "enable_deduplication": true
+}'
 
-# API will be available at:
-# http://localhost:8000
-
-# Example API call:
-curl -X POST "http://localhost:8000/search" \
+📊 Advanced Search:
+curl -X POST "https://your-railway-app.railway.app/search/advanced" \
 -H "Content-Type: application/json" \
 -d '{
     "industry": "technology",
-    "position": "software engineer",
-    "company": "Google",
-    "country": "United States",
-    "max_results": 20
+    "position": "data scientist",
+    "experience_level": "senior",
+    "company_size": "large",
+    "max_results": 25
 }'
+
+🔄 Deduplication Only:
+curl -X POST "https://your-railway-app.railway.app/deduplicate" \
+-H "Content-Type: application/json" \
+-d '{
+    "contacts": [/* your contact array */],
+    "strictness": "medium"
+}'
+
+⚠️ Important Notes:
+1. Always respect website Terms of Service
+2. Use LinkedIn's official API for production LinkedIn data
+3. Implement proper rate limiting
+4. Only collect publicly available information
+5. Comply with GDPR and privacy regulations
+
+🌐 Frontend Integration:
+The API is CORS-enabled and ready for frontend integration.
+All endpoints return structured JSON responses.
 """
