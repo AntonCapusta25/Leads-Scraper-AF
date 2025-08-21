@@ -1246,21 +1246,33 @@ class ContactScraper:
     def _extract_name_from_text(self, text: str) -> Optional[str]:
         """Extract person name from text"""
         try:
-            # Simple name extraction (can be improved with NLP)
+            if not text:
+                return None
+            
+            # Enhanced name extraction patterns
             name_patterns = [
                 r'\b([A-Z][a-z]+ [A-Z][a-z]+)\b',  # First Last
                 r'\b([A-Z][a-z]+ [A-Z]\. [A-Z][a-z]+)\b',  # First M. Last
-                r'\b([A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+)\b'  # First Middle Last
+                r'\b([A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+)\b',  # First Middle Last
+                r'\b([A-Z][a-z]+ [A-Z][a-z]+(?:-[A-Z][a-z]+)?)\b',  # First Last-Name
+                r'(?:CEO|Director|Manager|President)\s+([A-Z][a-z]+ [A-Z][a-z]+)',  # Title Name
+                r'([A-Z][a-z]+ [A-Z][a-z]+)(?:\s*,\s*(?:CEO|Director|Manager|President))',  # Name, Title
             ]
             
             for pattern in name_patterns:
                 matches = re.findall(pattern, text)
                 if matches:
-                    return matches[0]
+                    # Return first valid name (filter out common non-names)
+                    for match in matches:
+                        name = match if isinstance(match, str) else match[0] if isinstance(match, tuple) else str(match)
+                        # Filter out common false positives
+                        if not any(word in name.lower() for word in ['about', 'contact', 'services', 'company', 'group', 'team']):
+                            return name
             
             return None
             
-        except:
+        except Exception as e:
+            logger.debug(f"⚠️ Name extraction failed: {e}")
             return None
     
     def _extract_position_from_text(self, text: str, target_position: Optional[str] = None) -> Optional[str]:
@@ -2808,6 +2820,303 @@ async def validate_email_patterns(contact: ContactResponse):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Email validation failed: {str(e)}")
+
+@app.post("/search/debug")
+async def debug_search(request: SearchRequest):
+    """
+    Debug search to see what's happening step by step
+    """
+    try:
+        # Convert request to search parameters
+        search_params = SearchParameters(
+            industry=request.industry,
+            position=request.position,
+            company=request.company,
+            country=request.country,
+            city=request.city,
+            keywords=request.keywords,
+            experience_level=request.experience_level,
+            company_size=request.company_size,
+            max_results=min(request.max_results, 10)  # Limit for debugging
+        )
+        
+        debug_info = {
+            "search_params": asdict(search_params),
+            "google_query": scraper._build_google_query(search_params),
+            "steps": [],
+            "results_by_source": {}
+        }
+        
+        # Test Google search specifically
+        try:
+            if not scraper.browser_page:
+                await scraper._create_browser()
+                debug_info["steps"].append("✅ Browser created successfully")
+            
+            # Build and test Google search
+            search_query = scraper._build_google_query(search_params)
+            google_url = f"https://www.google.com/search?q={quote(search_query)}"
+            
+            debug_info["steps"].append(f"🔍 Google URL: {google_url}")
+            
+            scraper.browser_page.get(google_url)
+            await asyncio.sleep(3)
+            
+            # Check for results
+            search_results = scraper.browser_page.eles('css:.g')
+            debug_info["steps"].append(f"📊 Found {len(search_results)} Google result elements")
+            
+            # Parse a few results for debugging
+            parsed_results = []
+            for i, result in enumerate(search_results[:5]):
+                try:
+                    # Get basic info
+                    title_elem = result.ele('css:h3', timeout=1)
+                    link_elem = result.ele('css:a', timeout=1)
+                    snippet_elem = result.ele('css:.VwiC3b', timeout=1)
+                    
+                    result_info = {
+                        "index": i,
+                        "title": title_elem.text if title_elem else "No title",
+                        "url": link_elem.attr('href') if link_elem else "No URL",
+                        "snippet": snippet_elem.text if snippet_elem else "No snippet"
+                    }
+                    
+                    # Try to parse it
+                    contact = scraper._parse_google_result(result, search_params)
+                    result_info["parsed_contact"] = asdict(contact) if contact else None
+                    result_info["parsing_success"] = contact is not None
+                    
+                    parsed_results.append(result_info)
+                    
+                except Exception as e:
+                    parsed_results.append({
+                        "index": i,
+                        "error": str(e)
+                    })
+            
+            debug_info["google_results_sample"] = parsed_results
+            debug_info["steps"].append(f"📝 Parsed {len([r for r in parsed_results if r.get('parsing_success')])} contacts from Google")
+            
+        except Exception as e:
+            debug_info["steps"].append(f"❌ Google search failed: {str(e)}")
+        
+        return {
+            "success": True,
+            "message": "Debug search completed",
+            "debug_info": debug_info,
+            "recommendations": [
+                "Try adding more specific search terms (position, company, industry)",
+                "Check if the Google query looks reasonable",
+                "Verify that search results contain contact information",
+                "Consider using more targeted searches instead of just location"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Debug search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Debug search failed: {str(e)}")
+
+if __name__ == "__main__":
+    # Run the API server
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=PORT,
+        reload=False,  # Disable in production
+        log_level="info"
+    )
+
+# Example usage and API documentation:
+"""
+PROFESSIONAL CONTACT & PEOPLE SCRAPER API
+
+🚀 Features:
+- Multi-source contact scraping (Google, LinkedIn, Business Directories, Company Websites)
+- Advanced deduplication with fuzzy matching
+- LinkedIn integration with ToS compliance warnings
+- Railway deployment optimized
+- Real-time browser automation with stealth features
+- Comprehensive API with multiple endpoints
+
+📋 Main Endpoints:
+- POST /search - Main contact search
+- POST /search/linkedin - LinkedIn-only search (use responsibly)
+- POST /search/async - Background search for large requests
+- POST /deduplicate - Advanced contact deduplication
+- POST /search/advanced - Enhanced search with analytics
+- GET /health - Health check
+- GET /legal/disclaimer - Legal information
+
+🔧 Advanced Features:
+- Rate limiting and stealth browsing
+- Email pattern generation
+- Confidence scoring
+- Source attribution
+- Background search processing
+- CSV/JSON export capabilities
+- Browser management endpoints
+
+⚖️ Legal Compliance:
+- LinkedIn ToS warnings and compliance features
+- Rate limiting to respect target sites
+- Public data only extraction
+- User responsibility disclaimers
+
+🚀 Installation:
+pip install DrissionPage fastapi uvicorn python-multipart
+
+🔗 Example Usage:
+curl -X POST "https://your-railway-app.railway.app/search" \
+-H "Content-Type: application/json" \
+-d '{
+    "position": "Software Engineer",
+    "company": "Google",
+    "country": "United States",
+    "max_results": 10,
+    "enable_deduplication": true
+}'
+
+📊 Advanced Search:
+curl -X POST "https://your-railway-app.railway.app/search/advanced" \
+-H "Content-Type: application/json" \
+-d '{
+    "industry": "technology",
+    "position": "data scientist",
+    "experience_level": "senior",
+    "company_size": "large",
+    "max_results": 25
+}'
+
+🔄 Deduplication Only:
+curl -X POST "https://your-railway-app.railway.app/deduplicate" \
+-H "Content-Type: application/json" \
+-d '{
+    "contacts": [/* your contact array */],
+    "strictness": "medium"
+}'
+
+⚠️ Important Notes:
+1. Always respect website Terms of Service
+2. Use LinkedIn's official API for production LinkedIn data
+3. Implement proper rate limiting
+4. Only collect publicly available information
+5. Comply with GDPR and privacy regulations
+
+🌐 Frontend Integration:
+The API is CORS-enabled and ready for frontend integration.
+All endpoints return structured JSON responses.
+"""
+        valid_patterns = [email for email in email_patterns if re.match(email_regex, email)]
+        
+        return {
+            "success": True,
+            "contact_name": contact.name,
+            "company": contact.company,
+            "generated_patterns": email_patterns,
+            "valid_patterns": valid_patterns,
+            "pattern_count": len(valid_patterns),
+            "confidence": "medium" if len(valid_patterns) > 3 else "low"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email validation failed: {str(e)}")
+
+@app.post("/search/debug")
+async def debug_search(request: SearchRequest):
+    """
+    Debug search to see what's happening step by step
+    """
+    try:
+        # Convert request to search parameters
+        search_params = SearchParameters(
+            industry=request.industry,
+            position=request.position,
+            company=request.company,
+            country=request.country,
+            city=request.city,
+            keywords=request.keywords,
+            experience_level=request.experience_level,
+            company_size=request.company_size,
+            max_results=min(request.max_results, 10)  # Limit for debugging
+        )
+        
+        debug_info = {
+            "search_params": asdict(search_params),
+            "google_query": scraper._build_google_query(search_params),
+            "steps": [],
+            "results_by_source": {}
+        }
+        
+        # Test Google search specifically
+        try:
+            if not scraper.browser_page:
+                await scraper._create_browser()
+                debug_info["steps"].append("✅ Browser created successfully")
+            
+            # Build and test Google search
+            search_query = scraper._build_google_query(search_params)
+            google_url = f"https://www.google.com/search?q={quote(search_query)}"
+            
+            debug_info["steps"].append(f"🔍 Google URL: {google_url}")
+            
+            scraper.browser_page.get(google_url)
+            await asyncio.sleep(3)
+            
+            # Check for results
+            search_results = scraper.browser_page.eles('css:.g')
+            debug_info["steps"].append(f"📊 Found {len(search_results)} Google result elements")
+            
+            # Parse a few results for debugging
+            parsed_results = []
+            for i, result in enumerate(search_results[:5]):
+                try:
+                    # Get basic info
+                    title_elem = result.ele('css:h3', timeout=1)
+                    link_elem = result.ele('css:a', timeout=1)
+                    snippet_elem = result.ele('css:.VwiC3b', timeout=1)
+                    
+                    result_info = {
+                        "index": i,
+                        "title": title_elem.text if title_elem else "No title",
+                        "url": link_elem.attr('href') if link_elem else "No URL",
+                        "snippet": snippet_elem.text if snippet_elem else "No snippet"
+                    }
+                    
+                    # Try to parse it
+                    contact = scraper._parse_google_result(result, search_params)
+                    result_info["parsed_contact"] = asdict(contact) if contact else None
+                    result_info["parsing_success"] = contact is not None
+                    
+                    parsed_results.append(result_info)
+                    
+                except Exception as e:
+                    parsed_results.append({
+                        "index": i,
+                        "error": str(e)
+                    })
+            
+            debug_info["google_results_sample"] = parsed_results
+            debug_info["steps"].append(f"📝 Parsed {len([r for r in parsed_results if r.get('parsing_success')])} contacts from Google")
+            
+        except Exception as e:
+            debug_info["steps"].append(f"❌ Google search failed: {str(e)}")
+        
+        return {
+            "success": True,
+            "message": "Debug search completed",
+            "debug_info": debug_info,
+            "recommendations": [
+                "Try adding more specific search terms (position, company, industry)",
+                "Check if the Google query looks reasonable",
+                "Verify that search results contain contact information",
+                "Consider using more targeted searches instead of just location"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Debug search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Debug search failed: {str(e)}")
 
 if __name__ == "__main__":
     # Run the API server
