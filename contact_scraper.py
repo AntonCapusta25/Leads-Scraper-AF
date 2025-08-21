@@ -245,7 +245,9 @@ class ContactScraper:
             logger.error("Install with: pip install DrissionPage")
             return None, None, None, False
     
-    def _create_stealth_options(self):
+# Fix for line 249 - just replace this method in your original code:
+
+def _create_stealth_options(self):
     """Create enhanced stealth browser options for Railway"""
     ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
     
@@ -339,17 +341,6 @@ class ContactScraper:
     except Exception as e:
         logger.error(f"❌ Chrome options failed: {e}")
         return None
-    
-    async def _rate_limit(self):
-        """Apply standard rate limiting"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
-        
-        if time_since_last < self.min_delay:
-            sleep_time = self.min_delay - time_since_last + random.uniform(0.5, 1.5)
-            await asyncio.sleep(sleep_time)
-        
-        self.last_request_time = time.time()
     
     async def _rate_limit_linkedin(self):
         """Apply enhanced rate limiting for LinkedIn"""
