@@ -2805,7 +2805,7 @@ async def validate_email_patterns(contact: ContactResponse):
         
         # Basic email format validation
         import re
-        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
         valid_patterns = [email for email in email_patterns if re.match(email_regex, email)]
         
         return {
