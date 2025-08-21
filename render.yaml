@@ -1,0 +1,148 @@
+services:
+  # Main API Service
+  - type: web
+    name: contact-scraper-api
+    env: python
+    plan: starter  # Free tier - upgrade to standard for production
+    region: oregon  # Choose: oregon, frankfurt, singapore
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: uvicorn contact_scraper:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    
+    # Auto-deploy from GitHub
+    repo: https://github.com/yourusername/contact-scraper.git  # Update this
+    branch: main
+    rootDir: .
+    
+    # Environment Variables
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: HEADLESS
+        value: true
+      - key: STEALTH_MODE
+        value: true
+      - key: RATE_LIMIT_DELAY
+        value: 3
+      - key: LINKEDIN_RATE_LIMIT
+        value: 10
+      - key: LINKEDIN_DELAY
+        value: 8
+      - key: MAX_CONCURRENT_SEARCHES
+        value: 3
+      - key: DISABLE_IMAGES
+        value: true
+      - key: DISABLE_JS
+        value: false
+      - key: CHROME_BIN
+        value: /usr/bin/chromium-browser
+      - key: CHROMEDRIVER_PATH
+        value: /usr/bin/chromedriver
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      
+      # Security (Set these in Render Dashboard)
+      - key: API_KEY
+        generateValue: true  # Auto-generate secure API key
+      - key: SECRET_KEY
+        generateValue: true  # Auto-generate secret key
+        
+      # Optional: LinkedIn API (Recommended for production)
+      # - key: LINKEDIN_API_TOKEN
+      #   sync: false  # Set manually in dashboard
+      # - key: LINKEDIN_CLIENT_ID
+      #   sync: false
+      # - key: LINKEDIN_CLIENT_SECRET
+      #   sync: false
+      
+      # CORS Configuration
+      - key: ALLOWED_ORIGINS
+        value: "*"  # Update to specific domains in production
+        
+      # Monitoring
+      - key: ENABLE_METRICS
+        value: true
+        
+    # Build and Runtime Settings
+    buildFilter:
+      paths:
+        - contact_scraper.py
+        - requirements.txt
+        - render.yaml
+        - README.md
+      ignoredPaths:
+        - "*.md"
+        - "docs/**"
+        - "tests/**"
+        - ".git/**"
+        - "frontend/**"
+    
+    # Resource allocation
+    disk:
+      name: app-data
+      mountPath: /tmp
+      sizeGB: 1
+    
+    # Custom headers for better security
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /api/*
+        name: Access-Control-Allow-Methods
+        value: GET, POST, OPTIONS
+        
+  # Optional: Static Site for Frontend
+  - type: static
+    name: contact-scraper-frontend
+    buildCommand: |
+      # Copy frontend files
+      mkdir -p public
+      cp frontend/index.html public/
+      # Update API URL for production
+      sed -i "s|http://localhost:8000|https://contact-scraper-api.onrender.com|g" public/index.html
+    staticPublishPath: ./public
+    
+    # Frontend environment
+    envVars:
+      - key: NODE_ENV
+        value: production
+    
+    # Custom routes for SPA
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+        
+    # Headers for frontend
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=3600
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000
+
+# Optional: Database (if you want to store search history)
+# databases:
+#   - name: contact-scraper-db
+#     databaseName: contacts
+#     user: contacts_user
+#     plan: free  # Free PostgreSQL
+#     region: oregon
+
+# Optional: Redis for caching
+# - type: redis
+#   name: contact-scraper-cache
+#   plan: free
+#   region: oregon
