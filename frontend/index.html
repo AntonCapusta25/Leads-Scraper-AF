@@ -1274,8 +1274,10 @@
     </div>
 
     <script>
-        // Configuration
-        const API_BASE_URL = 'http://localhost:8000'; // Change this to your Render URL
+        // Configuration  
+        const API_BASE_URL = window.location.hostname === 'localhost' 
+        ? 'http://localhost:8000'
+        : 'https://contact-scraper-production.up.railway.app'; // Update with your actual Railway URL
         let currentResults = [];
         let currentStats = null;
         let currentView = 'table';
