@@ -25,6 +25,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
+# ⭐ ADD THESE LINES RIGHT HERE ⭐
+import os
+
+# Railway environment configuration
+PORT = int(os.getenv("PORT", 8000))
+RAILWAY_ENV = os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
+
+# Configure logging for Railway
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO")),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2077,10 +2091,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# ⭐ UPDATE YOUR EXISTING CORS MIDDLEWARE ⭐
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for your frontend
+    allow_origins=[
+        "http://localhost:3000",  # Local development
+        "http://localhost:8080",  # Local frontend
+        "https://*.vercel.app",   # All Vercel deployments
+        "https://contact-scraper-frontend.vercel.app",  # Your specific Vercel URL (update after deployment)
+        os.getenv("FRONTEND_URL", ""),  # Environment variable
+        "*"  # Keep this for development, remove in production if needed
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2113,7 +2134,17 @@ async def root():
             "docs": "/docs"
         }
     }
-
+    
+@app.get("/")
+async def root():
+    """Railway health check endpoint"""
+    return {
+        "message": "Contact & People Scraper API",
+        "status": "healthy",
+        "environment": RAILWAY_ENV,
+        "version": "1.0.0"
+    }
+    
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
