@@ -2048,19 +2048,6 @@ class SearchRequest(BaseModel):
     enable_deduplication: bool = Field(True, description="Enable advanced deduplication")
     dedup_strictness: str = Field("medium", description="Deduplication strictness: loose, medium, strict")
 
-class DeduplicationRequest(BaseModel):
-    contacts: List[ContactResponse] = Field(..., description="List of contacts to deduplicate")
-    strictness: str = Field("medium", description="Deduplication strictness: loose, medium, strict")
-
-class DeduplicationResponse(BaseModel):
-    success: bool
-    message: str
-    original_count: int
-    deduplicated_count: int
-    duplicates_removed: int
-    contacts: List[ContactResponse]
-    dedup_stats: dict
-
 class ContactResponse(BaseModel):
     name: str
     position: Optional[str] = None
@@ -2076,6 +2063,19 @@ class ContactResponse(BaseModel):
     source: Optional[str] = None
     scraped_at: Optional[str] = None
     confidence_score: float
+
+class DeduplicationRequest(BaseModel):
+    contacts: List[ContactResponse] = Field(..., description="List of contacts to deduplicate")
+    strictness: str = Field("medium", description="Deduplication strictness: loose, medium, strict")
+
+class DeduplicationResponse(BaseModel):
+    success: bool
+    message: str
+    original_count: int
+    deduplicated_count: int
+    duplicates_removed: int
+    contacts: List[ContactResponse]
+    dedup_stats: dict
 
 class SearchResponse(BaseModel):
     success: bool
