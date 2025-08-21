@@ -246,112 +246,99 @@ class ContactScraper:
             return None, None, None, False
     
     def _create_stealth_options(self):
-        """Create enhanced stealth browser options for professional networks"""
-        ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
+    """Create enhanced stealth browser options for Railway"""
+    ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
+    
+    if not available:
+        return None
         
-        if not available:
-            return None
-            
-        try:
-            co = ChromiumOptions()
-            
-            if self.headless:
-                co.set_argument('--headless=new')
-            
-            # Enhanced stealth arguments for LinkedIn and other professional networks
-            stealth_args = [
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-extensions',
-                '--disable-plugins',
-                '--disable-images',  # Faster loading
-                '--no-first-run',
-                '--disable-default-browser-check',
-                '--disable-infobars',
-                '--disable-notifications',
-                '--disable-popup-blocking',
-                '--disable-web-security',
-                '--disable-features=WebRTC',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding',
-                '--disable-automation',  # Hide automation indicators
-                '--disable-blink-features=AutomationControlled',
-                '--window-size=1920,1080',
-                '--disable-dev-tools',
-                '--no-default-browser-check',
-                '--no-first-run',
-                '--disable-default-apps',
-                '--disable-sync',
-                '--disable-translate',
-                '--hide-scrollbars',
-                '--mute-audio',
-                '--no-zygote',
-                '--disable-accelerated-2d-canvas',
-                '--disable-accelerated-jpeg-decoding',
-                '--disable-accelerated-mjpeg-decode',
-                '--disable-accelerated-video-decode',
-                '--user-agent=' + random.choice(self.user_agents)
+    try:
+        co = ChromiumOptions()
+        
+        # Railway Chrome detection
+        chrome_found = False
+        
+        # Try environment variables first
+        chrome_env_path = os.getenv('CHROME_BIN') or os.getenv('CHROMIUM_PATH')
+        if chrome_env_path:
+            # Handle wildcard paths
+            if '*' in chrome_env_path:
+                import glob
+                matches = glob.glob(chrome_env_path)
+                if matches:
+                    actual_path = matches[0]
+                    if os.path.exists(actual_path):
+                        co.set_browser_path(actual_path)
+                        chrome_found = True
+                        logger.info(f"✅ Found Chrome via env var: {actual_path}")
+            elif os.path.exists(chrome_env_path):
+                co.set_browser_path(chrome_env_path)
+                chrome_found = True
+                logger.info(f"✅ Found Chrome via env var: {chrome_env_path}")
+        
+        # Try standard paths if env vars don't work
+        if not chrome_found:
+            chrome_paths = [
+                '/nix/store/*/bin/chromium',      # Railway/Nix
+                '/usr/bin/chromium',              # Standard
+                '/usr/bin/chromium-browser',      # Alternative
+                '/usr/bin/google-chrome-stable',  # Google Chrome
             ]
             
-            for arg in stealth_args:
-                co.set_argument(arg)
-            
-            # Set user data directory with random suffix
-            import uuid
-            random_suffix = str(uuid.uuid4())[:8]
-            co.set_user_data_path(f'/tmp/chrome_scraper_data_{random_suffix}')
-            
-            # Additional stealth preferences
-            try:
-                prefs = {
-                    "profile.default_content_setting_values": {
-                        "notifications": 2,
-                        "media_stream": 2,
-                    },
-                    "profile.default_content_settings.popups": 0,
-                    "profile.managed_default_content_settings.images": 2,
-                    "profile.content_settings.exceptions.automatic_downloads.*.setting": 1
-                }
-                co.set_pref(**prefs)
-            except Exception as e:
-                logger.debug(f"⚠️ Could not set preferences: {e}")
-            
-            return co
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to create options: {e}")
-            return None
-    
-    async def _create_browser(self):
-        """Create browser instance"""
-        if self._browser_created and self.browser_page:
-            return self.browser_page
-            
-        ChromiumPage, ChromiumOptions, SessionPage, available = self._safe_import_drissionpage()
+            for path in chrome_paths:
+                if '*' in path:
+                    import glob
+                    matches = glob.glob(path)
+                    if matches:
+                        actual_path = matches[0]
+                        if os.path.exists(actual_path):
+                            co.set_browser_path(actual_path)
+                            chrome_found = True
+                            logger.info(f"✅ Found Chrome: {actual_path}")
+                            break
+                elif os.path.exists(path):
+                    co.set_browser_path(path)
+                    chrome_found = True
+                    logger.info(f"✅ Found Chrome: {path}")
+                    break
         
-        if not available:
-            raise Exception("DrissionPage not available")
+        if not chrome_found:
+            logger.warning("⚠️ Chrome not found - letting DrissionPage auto-detect")
         
-        try:
-            options = self._create_stealth_options()
-            if options:
-                self.browser_page = ChromiumPage(options)
-            else:
-                self.browser_page = ChromiumPage()
-            
-            # Test browser
-            self.browser_page.get('about:blank')
-            self._browser_created = True
-            logger.info("✅ Browser created successfully")
-            return self.browser_page
-            
-        except Exception as e:
-            logger.error(f"❌ Browser creation failed: {e}")
-            raise
+        # Railway-optimized arguments
+        if self.headless:
+            co.set_argument('--headless=new')
+        
+        railway_args = [
+            '--no-sandbox',                    # Required for Railway
+            '--disable-dev-shm-usage',         # Required for Railway
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-extensions',
+            '--disable-plugins', 
+            '--disable-images',
+            '--no-first-run',
+            '--disable-infobars',
+            '--disable-notifications',
+            '--disable-popup-blocking',
+            '--disable-automation',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1920,1080',
+            '--user-agent=' + random.choice(self.user_agents)
+        ]
+        
+        for arg in railway_args:
+            co.set_argument(arg)
+        
+        # Set temp directory
+        import uuid
+        co.set_user_data_path(f'/tmp/chrome_{uuid.uuid4().hex[:8]}')
+        
+        return co
+        
+    except Exception as e:
+        logger.error(f"❌ Chrome options failed: {e}")
+        return None
     
     async def _rate_limit(self):
         """Apply standard rate limiting"""
