@@ -682,7 +682,7 @@ class ContactScraper:
                 search_terms.append(f'"{params.company}"')
             if params.industry:
                 search_terms.append(f'"{params.industry}"')
-            if params.location or params.country:
+            if params.city or params.country:
                 location = f"{params.city or ''} {params.country or ''}".strip()
                 search_terms.append(f'"{location}"')
             
@@ -755,7 +755,7 @@ class ContactScraper:
                 search_params_dict['keywords'] = params.position
             if params.company:
                 search_params_dict['currentCompany'] = params.company
-            if params.location or params.country:
+            if params.city or params.country:
                 location = f"{params.city or ''} {params.country or ''}".strip()
                 search_params_dict['geoUrn'] = location
             
@@ -947,7 +947,7 @@ class ContactScraper:
                 parts.append(f'company:"{params.company}"')
             if params.industry:
                 parts.append(f'industry:"{params.industry}"')
-            if params.location or params.country:
+            if params.city or params.country:
                 location = f"{params.city or ''} {params.country or ''}".strip()
                 parts.append(f'location:"{location}"')
             
@@ -967,6 +967,12 @@ class ContactScraper:
             query_parts.append(f'"{params.position}"')
         elif params.company:
             query_parts.append(f'"{params.company}"')
+        elif params.industry:
+            query_parts.append(f'"{params.industry}"')
+        
+        # If no core terms, add default professional search terms
+        if not query_parts:
+            query_parts.append('(CEO OR director OR manager OR "contact us" OR "leadership team")')
         
         # Location
         if params.city and params.country:
@@ -977,14 +983,14 @@ class ContactScraper:
             query_parts.append(f'"{params.city}"')
         
         # Industry
-        if params.industry:
+        if params.industry and params.industry not in " ".join(query_parts):
             query_parts.append(f'"{params.industry}"')
         
         # Add contact-specific terms
-        query_parts.append('(email OR contact OR linkedin OR profile)')
+        query_parts.append('(email OR contact OR linkedin OR "about us" OR team)')
         
         # Exclude job boards and generic sites
-        query_parts.append('-indeed.com -glassdoor.com -jobsite.com')
+        query_parts.append('-indeed.com -glassdoor.com -jobsite.com -linkedin.com/jobs')
         
         return " ".join(query_parts)
     
@@ -1003,21 +1009,37 @@ class ContactScraper:
             url = link_elem.attr('href') or ""
             snippet = snippet_elem.text if snippet_elem else ""
             
+            # Skip unwanted domains
+            excluded_domains = ['indeed.com', 'glassdoor.com', 'jobsite.com', 'wikipedia.org']
+            if any(domain in url.lower() for domain in excluded_domains):
+                return None
+            
             # Extract information from title and snippet
+            full_text = f"{title} {snippet}"
             name = self._extract_name_from_text(title)
-            position = self._extract_position_from_text(title + " " + snippet, params.position)
-            company = self._extract_company_from_text(title + " " + snippet, params.company)
+            position = self._extract_position_from_text(full_text, params.position)
+            company = self._extract_company_from_text(full_text, params.company)
             location = self._extract_location_from_text(snippet, params.country, params.city)
             
             # Try to find email pattern
             email = self._extract_email_from_text(snippet)
             
+            # If no name found but we have other good data, create a generic entry
+            if not name and (email or (company and position)):
+                if email:
+                    name = self._extract_name_from_email(email)
+                else:
+                    name = f"{position or 'Professional'} at {company or 'Company'}"
+            
             # Calculate confidence score
             confidence = self._calculate_confidence(name, position, company, params)
             
-            if confidence > 0.3:  # Minimum confidence threshold
+            # Lower threshold for location-only searches
+            min_confidence = 0.2 if not params.position and not params.company else 0.3
+            
+            if confidence > min_confidence and name:
                 return ContactResult(
-                    name=name or "Unknown",
+                    name=name,
                     position=position,
                     company=company,
                     location=location,
@@ -2771,7 +2793,7 @@ async def validate_email_patterns(contact: ContactResponse):
         
         # Basic email format validation
         import re
-        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
         valid_patterns = [email for email in email_patterns if re.match(email_regex, email)]
         
         return {
