@@ -2,7 +2,7 @@ fastapi==0.104.1
 uvicorn==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
-DrissionPage==4.0.0b25
+DrissionPage>=4.0.0b24,<5.0.0
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
