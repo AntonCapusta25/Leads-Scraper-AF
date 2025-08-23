@@ -270,44 +270,26 @@ class RailwayContactScraper:
             return False
     
     async def search_contacts(self, params: SearchParameters) -> List[ContactResult]:
-        """Main search method - REAL web scraping with multiple strategies"""
-        logger.info(f"🔍 Starting REAL contact search: {params}")
+        """Main search method - HTTP-FIRST with browser fallback"""
+        logger.info(f"🔍 Starting HTTP-FIRST contact search: {params}")
         
         all_results = []
         methods_attempted = []
         
-        # Strategy 1: Try browser-based scraping (most comprehensive)
-        if self.enable_browser:
-            try:
-                if not self._browser_available:
-                    browser_ready = await self._init_browser_with_patience()
-                else:
-                    browser_ready = True
-                
-                if browser_ready:
-                    logger.info("🌐 Attempting browser-based REAL scraping...")
-                    browser_results = await self._real_browser_scraping(params)
-                    all_results.extend(browser_results)
-                    methods_attempted.append("Browser Scraping")
-                    logger.info(f"🌐 Browser scraping: {len(browser_results)} real contacts found")
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Browser scraping failed: {e}")
-        
-        # Strategy 2: HTTP-based REAL scraping of professional sites
+        # PRIMARY STRATEGY: HTTP-based REAL scraping (fast and reliable)
         try:
             await self._init_http_session()
-            logger.info("📡 Attempting HTTP-based REAL scraping...")
+            logger.info("📡 Starting PRIMARY HTTP-based scraping...")
             
             http_results = await self._real_http_scraping(params)
             all_results.extend(http_results)
             methods_attempted.append("HTTP Scraping")
-            logger.info(f"📡 HTTP scraping: {len(http_results)} real contacts found")
+            logger.info(f"📡 PRIMARY HTTP scraping: {len(http_results)} real contacts found")
             
         except Exception as e:
-            logger.warning(f"⚠️ HTTP scraping failed: {e}")
+            logger.warning(f"⚠️ Primary HTTP scraping failed: {e}")
         
-        # Strategy 3: Professional directory APIs and structured data
+        # SECONDARY STRATEGY: Professional directory APIs and structured data
         try:
             api_results = await self._real_api_scraping(params)
             all_results.extend(api_results)
@@ -317,12 +299,34 @@ class RailwayContactScraper:
         except Exception as e:
             logger.warning(f"⚠️ API scraping failed: {e}")
         
+        # FALLBACK STRATEGY: Browser-based scraping (only if needed and available)
+        if len(all_results) < params.max_results // 2 and self.enable_browser_fallback:
+            try:
+                if not self._browser_available:
+                    browser_ready = await self._init_browser_with_patience()
+                else:
+                    browser_ready = True
+                
+                if browser_ready:
+                    logger.info("🌐 Starting FALLBACK browser-based scraping...")
+                    browser_results = await self._real_browser_scraping(params)
+                    all_results.extend(browser_results)
+                    methods_attempted.append("Browser Scraping (Fallback)")
+                    logger.info(f"🌐 FALLBACK browser scraping: {len(browser_results)} real contacts found")
+                else:
+                    logger.info("⚠️ Browser fallback unavailable - continuing with HTTP results")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Browser fallback failed: {e}")
+        else:
+            logger.info(f"✅ Sufficient results from HTTP methods ({len(all_results)}), skipping browser fallback")
+        
         # Deduplicate and sort by confidence
         unique_results = self._deduplicate_real_contacts(all_results)
         sorted_results = sorted(unique_results, key=lambda x: x.confidence_score, reverse=True)
         final_results = sorted_results[:params.max_results]
         
-        logger.info(f"✅ REAL search complete: {len(final_results)} genuine contacts from {len(methods_attempted)} methods")
+        logger.info(f"✅ HTTP-FIRST search complete: {len(final_results)} genuine contacts from {len(methods_attempted)} methods")
         return final_results
     
     async def _real_browser_scraping(self, params: SearchParameters) -> List[ContactResult]:
@@ -1640,9 +1644,9 @@ class SearchResponse(BaseModel):
 
 # FastAPI Application
 app = FastAPI(
-    title="Railway Contact Scraper - REAL Data",
-    description="Professional contact scraper with REAL web scraping (Railway timeout issues fixed)",
-    version="6.0.0-REAL-SCRAPING"
+    title="Railway Contact Scraper - HTTP-First",
+    description="Professional contact scraper with HTTP-first architecture and browser fallback (Railway optimized)",
+    version="6.1.0-HTTP-FIRST"
 )
 
 # CORS
@@ -1654,12 +1658,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global scraper
-scraper = RailwayContactScraper(enable_browser=True)
+# Global scraper - HTTP-first with browser fallback
+scraper = RailwayContactScraper(enable_browser_fallback=True)
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 Railway Contact Scraper starting up - REAL web scraping enabled...")
+    logger.info("🚀 Railway Contact Scraper starting up - HTTP-FIRST with browser fallback...")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -1669,17 +1673,19 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     return {
-        "message": "Railway Contact Scraper - REAL Web Scraping",
+        "message": "Railway Contact Scraper - HTTP-First with Browser Fallback",
         "status": "healthy",
-        "version": "6.0.0-REAL-SCRAPING",
+        "version": "6.1.0-HTTP-FIRST",
+        "architecture": "HTTP-first with browser fallback",
         "features": [
-            "Browser-based scraping with Railway timeout fixes",
-            "HTTP-based REAL website scraping",
-            "Professional directory integration",
+            "PRIMARY: HTTP-based REAL website scraping",
+            "SECONDARY: Professional directory integration", 
+            "FALLBACK: Browser automation (if needed)",
             "LinkedIn profile discovery",
             "Company website contact extraction",
             "Respectful rate limiting",
-            "REAL contact data only"
+            "Advanced fuzzy deduplication",
+            "REAL contact data only - optimized for Railway"
         ]
     }
 
@@ -1688,10 +1694,12 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "6.0.0-REAL-SCRAPING",
-        "browser_available": scraper._browser_available,
+        "version": "6.1.0-HTTP-FIRST", 
+        "architecture": "HTTP-first with browser fallback",
         "http_session_ready": scraper.session is not None,
-        "data_quality": "REAL contacts only - no fake data"
+        "browser_available": scraper._browser_available,
+        "data_quality": "REAL contacts only - HTTP-first approach",
+        "railway_optimized": True
     }
 
 @app.post("/search", response_model=SearchResponse)
@@ -1710,13 +1718,18 @@ async def search_contacts(request: SearchRequest):
         methods = list(set([contact.source for contact in results if contact.source]))
         
         # Determine data quality
-        data_quality = "HIGH - Real web scraping" if len(methods) > 1 else "MEDIUM - Limited sources"
-        if not results:
+        if len(methods) >= 2:
+            data_quality = "HIGH - Multiple HTTP sources"
+        elif len(methods) == 1 and "HTTP" in str(methods):
+            data_quality = "GOOD - HTTP scraping"
+        elif len(methods) == 1:
+            data_quality = "MEDIUM - Single source"
+        else:
             data_quality = "NO RESULTS - Try different search parameters"
         
         return SearchResponse(
             success=True,
-            message=f"Found {len(results)} REAL contacts using {len(methods)} scraping methods",
+            message=f"Found {len(results)} REAL contacts using HTTP-first approach ({len(methods)} methods)",
             total_results=len(results),
             contacts=contacts,
             search_params=asdict(search_params),
@@ -1730,38 +1743,47 @@ async def search_contacts(request: SearchRequest):
 
 @app.get("/test/browser")
 async def test_browser():
-    """Test browser initialization in Railway"""
+    """Test browser initialization in Railway - FALLBACK ONLY"""
     try:
         browser_ready = await scraper._init_browser_with_patience()
         
         return {
             "success": browser_ready,
-            "message": "Browser test completed",
+            "message": "Browser fallback test completed",
             "browser_available": scraper._browser_available,
             "retry_count": scraper.browser_retry_count,
-            "note": "Browser timeouts are normal in Railway - HTTP scraping will be used as fallback"
+            "architecture": "HTTP-first with browser fallback",
+            "note": "Browser is FALLBACK only - HTTP scraping is primary method in Railway"
         }
         
     except Exception as e:
         return {
             "success": False,
-            "message": f"Browser test failed: {e}",
+            "message": f"Browser fallback test failed: {e}",
             "browser_available": scraper._browser_available,
-            "note": "This is expected in Railway environment"
+            "architecture": "HTTP-first with browser fallback",
+            "note": "Browser unavailable - this is fine, HTTP scraping is primary"
         }
 
 @app.get("/api/scraper-status")
 async def get_scraper_status():
-    """Get detailed scraper status"""
+    """Get detailed scraper status - HTTP-first architecture"""
     return {
-        "browser_available": scraper._browser_available,
-        "browser_retries": scraper.browser_retry_count,
+        "architecture": "HTTP-first with browser fallback",
         "http_session_ready": scraper.session is not None,
+        "browser_available": scraper._browser_available,
+        "browser_fallback_enabled": scraper.enable_browser_fallback,
+        "browser_retries": scraper.browser_retry_count,
         "request_count": scraper.request_count,
         "last_request_time": scraper.last_request_time,
-        "version": "6.0.0-REAL-SCRAPING",
-        "data_source": "REAL web scraping only",
-        "railway_optimized": True
+        "version": "6.1.0-HTTP-FIRST",
+        "data_source": "REAL web scraping - HTTP primary",
+        "railway_optimized": True,
+        "priority_order": [
+            "1. HTTP-based scraping (primary)",
+            "2. Professional APIs/directories", 
+            "3. Browser automation (fallback only)"
+        ]
     }
 
 if __name__ == "__main__":
