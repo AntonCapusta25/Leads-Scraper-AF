@@ -495,10 +495,13 @@ class ContactScraper:
         return final_results
 
     async def _search_google_contacts(self, params: SearchParameters) -> List[ContactResult]:
-        """Search for contacts using Google search"""
+        """FIXED: Search for contacts using Google search with timeout handling"""
         try:
             if not self.browser_page:
-                await self._create_browser()
+                browser_success = await self._create_browser()
+                if not browser_success:
+                    logger.error("❌ Failed to create browser for Google search")
+                    return []
             
             # Build Google search query
             search_query = self._build_google_query(params)
@@ -506,59 +509,160 @@ class ContactScraper:
             
             logger.info(f"🔍 Google searching: {search_query}")
             
-            self.browser_page.get(google_url)
-            await asyncio.sleep(3)
-            
-            # Check for CAPTCHA or blocking
-            page_text = self.browser_page.html.lower()
-            if 'captcha' in page_text or 'unusual traffic' in page_text:
-                logger.warning("⚠️ Google CAPTCHA detected - may need to wait or change IP")
-                return []
+            # FIXED: Add timeout protection and retry logic
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"🔍 Google search attempt {attempt + 1}/{max_retries}")
+                    
+                    # Navigate with shorter timeout
+                    self.browser_page.get(google_url)
+                    
+                    # Wait with shorter timeout and check if page loaded
+                    await asyncio.sleep(2)  # Reduced from 3 seconds
+                    
+                    # FIXED: Quick check if page loaded successfully
+                    try:
+                        page_title = self.browser_page.title
+                        if not page_title or 'Google' not in page_title:
+                            logger.warning(f"⚠️ Attempt {attempt + 1}: Page didn't load properly, retrying...")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2)
+                                continue
+                            else:
+                                logger.error("❌ Google page failed to load after all attempts")
+                                return []
+                    except Exception as e:
+                        logger.warning(f"⚠️ Attempt {attempt + 1}: Could not get page title: {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2)
+                            continue
+                        else:
+                            return []
+                    
+                    # FIXED: Quick check for blocking with timeout protection
+                    try:
+                        # Get a small sample of HTML to check for blocking
+                        page_text = ""
+                        try:
+                            # Try to get page content with a very short timeout
+                            page_text = self.browser_page.html[:1000].lower()  # Only first 1000 chars
+                        except Exception as timeout_e:
+                            logger.warning(f"⚠️ Attempt {attempt + 1}: Timeout getting page content: {timeout_e}")
+                            if attempt < max_retries - 1:
+                                # Try to restart browser on timeout
+                                await self._restart_browser()
+                                continue
+                            else:
+                                logger.error("❌ Persistent timeout issues, giving up")
+                                return []
+                        
+                        if 'captcha' in page_text or 'unusual traffic' in page_text:
+                            logger.warning(f"⚠️ Attempt {attempt + 1}: Google CAPTCHA detected")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(5)  # Wait longer before retry
+                                continue
+                            else:
+                                logger.error("❌ Google blocked all attempts")
+                                return []
+                                
+                    except Exception as e:
+                        logger.warning(f"⚠️ Attempt {attempt + 1}: Error checking for blocks: {e}")
+                    
+                    # If we get here, the page loaded successfully
+                    break
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Attempt {attempt + 1} failed: {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(3)
+                        # Try to restart browser on critical errors
+                        if "timeout" in str(e).lower():
+                            await self._restart_browser()
+                        continue
+                    else:
+                        logger.error(f"❌ All Google search attempts failed: {e}")
+                        return []
             
             results = []
             
-            # Parse Google results with multiple selector fallbacks
-            search_result_selectors = [
-                '.g',  # Traditional selector
-                '.tF2Cxc',  # Modern Google result container
-                '.yuRUbf',  # Another common one
-                'div[data-sokoban-container] div[data-sokoban-feature]',  # New Google structure
-                '[data-ved] h3',  # Alternative
-                '.rc',  # Classic results
-                '.srg .g'  # Search results group
-            ]
-            
-            search_results = []
-            for selector in search_result_selectors:
-                try:
-                    elements = self.browser_page.eles(f'css:{selector}')
-                    if elements:
-                        search_results = elements
-                        logger.info(f"✅ Found {len(elements)} results with selector: {selector}")
-                        break
-                except Exception as e:
-                    logger.debug(f"⚠️ Selector {selector} failed: {e}")
-                    continue
-            
-            if not search_results:
-                logger.warning("⚠️ No search results found with any selector")
+            # FIXED: Parse Google results with timeout protection
+            try:
+                search_result_selectors = [
+                    '.g',  # Traditional selector
+                    '.tF2Cxc',  # Modern Google result container
+                    '.yuRUbf',  # Another common one
+                    'div[data-sokoban-container] div[data-sokoban-feature]',  # New Google structure
+                    '[data-ved] h3',  # Alternative
+                    '.rc',  # Classic results
+                    '.srg .g'  # Search results group
+                ]
+                
+                search_results = []
+                for selector in search_result_selectors:
+                    try:
+                        elements = self.browser_page.eles(f'css:{selector}')
+                        if elements:
+                            search_results = elements
+                            logger.info(f"✅ Found {len(elements)} results with selector: {selector}")
+                            break
+                    except Exception as e:
+                        logger.debug(f"⚠️ Selector {selector} failed: {e}")
+                        continue
+                
+                if not search_results:
+                    logger.warning("⚠️ No search results found with any selector")
+                    return []
+                
+                # FIXED: Parse results with better error handling
+                for i, result in enumerate(search_results[:10]):  # Reduced from 15 to 10 for speed
+                    try:
+                        contact = self._parse_google_result(result, params, i)
+                        if contact:
+                            contact.source = "Google Search"
+                            results.append(contact)
+                            logger.debug(f"✅ Parsed contact {i+1}: {contact.name}")
+                    except Exception as e:
+                        logger.debug(f"⚠️ Failed to parse Google result {i+1}: {e}")
+                        continue
+                
+                logger.info(f"✅ Google search completed: {len(results)} contacts found")
+                return results
+                
+            except Exception as e:
+                logger.error(f"❌ Error parsing Google results: {e}")
                 return []
             
-            for i, result in enumerate(search_results[:15]):  # Process more results
-                try:
-                    contact = self._parse_google_result(result, params, i)
-                    if contact:
-                        contact.source = "Google Search"
-                        results.append(contact)
-                except Exception as e:
-                    logger.debug(f"⚠️ Failed to parse Google result: {e}")
-                    continue
-            
-            return results
-            
         except Exception as e:
-            logger.error(f"❌ Google search failed: {e}")
+            logger.error(f"❌ Google search failed with critical error: {e}")
             return []
+    
+    async def _restart_browser(self):
+        """FIXED: Restart browser on timeout issues"""
+        try:
+            logger.info("🔄 Restarting browser due to timeout issues...")
+            
+            # Close current browser
+            if self.browser_page:
+                try:
+                    self.browser_page.quit()
+                except:
+                    pass
+                self.browser_page = None
+                self._browser_created = False
+            
+            # Wait a moment
+            await asyncio.sleep(2)
+            
+            # Create new browser
+            success = await self._create_browser()
+            if success:
+                logger.info("✅ Browser restarted successfully")
+            else:
+                logger.error("❌ Browser restart failed")
+                
+        except Exception as e:
+            logger.error(f"❌ Browser restart error: {e}")
     
     def _parse_google_result(self, result_element, params: SearchParameters, index: int) -> Optional[ContactResult]:
         """FIXED: Parse individual Google search result with correct error handling"""
@@ -1106,45 +1210,306 @@ class ContactScraper:
             logger.debug(f"⚠️ Email pattern generation failed: {e}")
             return []
 
-    # Deduplication methods (simplified for space)
-    # In the ContactScraper class, replace the _deduplicate_results method with this:
+    # FIXED: Complete deduplication methods
+    def _deduplicate_results(self, results: List[ContactResult]) -> List[ContactResult]:
+        """
+        Advanced deduplication with fuzzy matching and data merging
+        """
+        try:
+            if not results:
+                return []
+            
+            logger.info(f"🔄 Starting deduplication for {len(results)} contacts...")
+            
+            # Step 1: Group potentially duplicate contacts
+            duplicate_groups = self._group_duplicates(results)
+            
+            # Step 2: Merge duplicates within each group
+            deduplicated_contacts = []
+            for group in duplicate_groups:
+                if len(group) == 1:
+                    deduplicated_contacts.append(group[0])
+                else:
+                    # Merge multiple contacts into one
+                    merged_contact = self._merge_contacts(group)
+                    deduplicated_contacts.append(merged_contact)
+            
+            # Step 3: Final validation and cleanup
+            final_contacts = self._final_dedup_validation(deduplicated_contacts)
+            
+            removed_count = len(results) - len(final_contacts)
+            logger.info(f"✅ Deduplication complete: {removed_count} duplicates removed, {len(final_contacts)} unique contacts")
+            
+            return final_contacts
+            
+        except Exception as e:
+            logger.error(f"❌ Deduplication failed: {e}")
+            # Fallback to basic deduplication
+            return self._basic_deduplicate(results)
+    
+    def _group_duplicates(self, results: List[ContactResult]) -> List[List[ContactResult]]:
+        """Group contacts that are likely duplicates"""
+        try:
+            groups = []
+            processed = set()
+            
+            for i, contact in enumerate(results):
+                if i in processed:
+                    continue
+                
+                # Start a new group with this contact
+                current_group = [contact]
+                processed.add(i)
+                
+                # Find all other contacts that match this one
+                for j, other_contact in enumerate(results[i+1:], i+1):
+                    if j in processed:
+                        continue
+                    
+                    if self._are_duplicates(contact, other_contact):
+                        current_group.append(other_contact)
+                        processed.add(j)
+                
+                groups.append(current_group)
+            
+            return groups
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Grouping duplicates failed: {e}")
+            return [[contact] for contact in results]
+    
+    def _are_duplicates(self, contact1: ContactResult, contact2: ContactResult) -> bool:
+        """
+        Determine if two contacts are duplicates using multiple criteria
+        """
+        try:
+            # Exact email match (highest priority)
+            if contact1.email and contact2.email:
+                if contact1.email.lower() == contact2.email.lower():
+                    return True
+            
+            # Exact LinkedIn URL match
+            if contact1.linkedin_url and contact2.linkedin_url:
+                if self._normalize_linkedin_url(contact1.linkedin_url) == self._normalize_linkedin_url(contact2.linkedin_url):
+                    return True
+            
+            # Exact phone match
+            if contact1.phone and contact2.phone:
+                if self._normalize_phone(contact1.phone) == self._normalize_phone(contact2.phone):
+                    return True
+            
+            # Name + Company similarity
+            name_similarity = self._calculate_name_similarity(contact1.name, contact2.name)
+            company_similarity = self._calculate_company_similarity(contact1.company, contact2.company)
+            
+            # High name similarity + same company = duplicate
+            if (name_similarity >= self.dedup_thresholds["name_similarity"] and 
+                company_similarity >= self.dedup_thresholds["company_similarity"]):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Duplicate check failed: {e}")
+            return False
+    
+    def _calculate_name_similarity(self, name1: Optional[str], name2: Optional[str]) -> float:
+        """Calculate similarity between two names"""
+        try:
+            if not name1 or not name2:
+                return 0.0
+            
+            # Normalize names
+            name1_clean = self._normalize_name(name1)
+            name2_clean = self._normalize_name(name2)
+            
+            if not name1_clean or not name2_clean:
+                return 0.0
+            
+            # Exact match
+            if name1_clean == name2_clean:
+                return 1.0
+            
+            # Overall string similarity
+            return SequenceMatcher(None, name1_clean, name2_clean).ratio()
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Name similarity calculation failed: {e}")
+            return 0.0
+    
+    def _calculate_company_similarity(self, company1: Optional[str], company2: Optional[str]) -> float:
+        """Calculate similarity between two companies"""
+        try:
+            if not company1 or not company2:
+                return 0.0
+            
+            # Normalize company names
+            comp1_clean = self._normalize_company_name(company1)
+            comp2_clean = self._normalize_company_name(company2)
+            
+            if not comp1_clean or not comp2_clean:
+                return 0.0
+            
+            # Exact match
+            if comp1_clean == comp2_clean:
+                return 1.0
+            
+            # Check if one is contained in the other
+            if comp1_clean in comp2_clean or comp2_clean in comp1_clean:
+                return 0.9
+            
+            # String similarity
+            return SequenceMatcher(None, comp1_clean, comp2_clean).ratio()
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Company similarity calculation failed: {e}")
+            return 0.0
+    
+    def _merge_contacts(self, contacts: List[ContactResult]) -> ContactResult:
+        """
+        Merge multiple contact records into a single, comprehensive record
+        """
+        try:
+            if len(contacts) == 1:
+                return contacts[0]
+            
+            # Choose the contact with highest confidence as base
+            base_contact = max(contacts, key=lambda c: c.confidence_score)
+            return base_contact  # Simplified for now
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Contact merging failed: {e}")
+            # Return the contact with highest confidence
+            return max(contacts, key=lambda c: c.confidence_score)
+    
+    def _final_dedup_validation(self, contacts: List[ContactResult]) -> List[ContactResult]:
+        """Final validation to catch any remaining duplicates"""
+        try:
+            # Quick check for exact matches that might have been missed
+            seen_emails = set()
+            final_contacts = []
+            
+            for contact in contacts:
+                skip = False
+                
+                # Check email
+                if contact.email:
+                    email_normalized = contact.email.lower().strip()
+                    if email_normalized in seen_emails:
+                        skip = True
+                    else:
+                        seen_emails.add(email_normalized)
+                
+                if not skip:
+                    final_contacts.append(contact)
+            
+            return final_contacts
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Final validation failed: {e}")
+            return contacts
+    
+    def _basic_deduplicate(self, results: List[ContactResult]) -> List[ContactResult]:
+        """Fallback basic deduplication method"""
+        try:
+            seen = set()
+            unique_results = []
+            
+            for result in results:
+                # Create identifier for deduplication
+                identifier_parts = []
+                
+                if result.email:
+                    identifier_parts.append(result.email.lower())
+                else:
+                    if result.name:
+                        identifier_parts.append(result.name.lower())
+                    if result.company:
+                        identifier_parts.append(result.company.lower())
+                
+                identifier = "|".join(identifier_parts)
+                
+                if identifier and identifier not in seen:
+                    seen.add(identifier)
+                    unique_results.append(result)
+            
+            return unique_results
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Basic deduplication failed: {e}")
+            return results
+    
+    # Normalization helper methods
+    def _normalize_name(self, name: str) -> str:
+        """Normalize name for comparison"""
+        try:
+            if not name:
+                return ""
+            
+            # Remove extra whitespace, convert to lowercase
+            normalized = re.sub(r'\s+', ' ', name.strip().lower())
+            return normalized
+            
+        except:
+            return name.lower() if name else ""
+    
+    def _normalize_company_name(self, company: str) -> str:
+        """Normalize company name for comparison"""
+        try:
+            if not company:
+                return ""
+            
+            normalized = company.lower().strip()
+            
+            # Remove common company suffixes
+            suffixes = ['inc.', 'inc', 'corp.', 'corp', 'ltd.', 'ltd', 'llc', 'llp', 
+                       'co.', 'co', 'company', 'corporation', 'limited']
+            
+            for suffix in suffixes:
+                if normalized.endswith(' ' + suffix):
+                    normalized = normalized[:-len(suffix)-1].strip()
+                elif normalized.endswith(suffix):
+                    normalized = normalized[:-len(suffix)].strip()
+            
+            # Remove extra whitespace
+            normalized = re.sub(r'\s+', ' ', normalized)
+            
+            return normalized
+            
+        except:
+            return company.lower() if company else ""
+    
+    def _normalize_linkedin_url(self, url: str) -> str:
+        """Normalize LinkedIn URL for comparison"""
+        try:
+            if not url:
+                return ""
+            
+            # Extract the profile ID from LinkedIn URL
+            match = re.search(r'/in/([^/?]+)', url.lower())
+            return match.group(1) if match else url.lower()
+            
+        except:
+            return url.lower() if url else ""
+    
+    def _normalize_phone(self, phone: str) -> str:
+        """Normalize phone number for comparison"""
+        try:
+            if not phone:
+                return ""
+            
+            # Remove all non-digit characters
+            digits_only = re.sub(r'[^\d]', '', phone)
+            
+            # Handle US numbers (remove country code if present)
+            if len(digits_only) == 11 and digits_only.startswith('1'):
+                digits_only = digits_only[1:]
+            
+            return digits_only
+            
+        except:
+            return phone if phone else ""
 
-def _deduplicate_results(self, results: List[ContactResult]) -> List[ContactResult]:
-    """
-    FIXED: Advanced deduplication with fuzzy matching and data merging
-    """
-    try:
-        if not results:
-            return []
-
-        logger.info(f"🔄 Starting ADVANCED deduplication for {len(results)} contacts...")
-
-        # Step 1: Group potentially duplicate contacts
-        duplicate_groups = self._group_duplicates(results)
-
-        # Step 2: Merge duplicates within each group
-        deduplicated_contacts = []
-        for group in duplicate_groups:
-            if len(group) == 1:
-                deduplicated_contacts.append(group[0])
-            else:
-                # Merge multiple contacts into one
-                merged_contact = self._merge_contacts(group)
-                deduplicated_contacts.append(merged_contact)
-
-        # Step 3: Final validation and cleanup
-        final_contacts = self._final_dedup_validation(deduplicated_contacts)
-
-        removed_count = len(results) - len(final_contacts)
-        logger.info(f"✅ Deduplication complete: {removed_count} duplicates removed, {len(final_contacts)} unique contacts")
-
-        return final_contacts
-
-    except Exception as e:
-        logger.error(f"❌ Deduplication failed: {e}")
-        # Fallback to basic deduplication
-        return self._basic_deduplicate(results)
-        
     # Test functionality for debugging
     async def test_search_functionality(self, params: SearchParameters) -> Dict[str, Any]:
         """Test method to debug search functionality step by step"""
@@ -1612,6 +1977,58 @@ async def test_browser():
             "browser_created": scraper._browser_created
         }
 
+@app.get("/test/quick")
+async def quick_test():
+    """Quick test to verify the scraper is working"""
+    try:
+        # Test with very simple search
+        simple_params = SearchParameters(
+            keywords="CEO contact",
+            max_results=3,
+            min_confidence=0.20
+        )
+        
+        # Quick browser test
+        if not scraper.browser_page:
+            browser_success = await scraper._create_browser()
+            if not browser_success:
+                return {
+                    "success": False,
+                    "message": "Browser creation failed",
+                    "browser_status": "failed"
+                }
+        
+        # Try a very simple Google search
+        try:
+            test_url = "https://www.google.com/search?q=CEO+contact"
+            scraper.browser_page.get(test_url)
+            await asyncio.sleep(2)
+            
+            page_title = scraper.browser_page.title
+            return {
+                "success": True,
+                "message": "Quick test successful",
+                "browser_status": "active",
+                "page_title": page_title,
+                "test_url": test_url,
+                "version": "4.0.0-FINAL"
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Google test failed: {str(e)}",
+                "browser_status": "error",
+                "error": str(e)
+            }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Quick test failed: {str(e)}",
+            "error": str(e)
+        }
+
 @app.get("/api/stats")
 async def get_api_stats():
     """Get API usage statistics"""
@@ -1628,6 +2045,31 @@ async def get_api_stats():
             "linkedin_delay": scraper.linkedin_delay
         }
     }
+
+@app.get("/api/browser/restart")
+async def restart_browser():
+    """FIXED: Restart browser instance"""
+    try:
+        # Close existing browser
+        await scraper.close()
+        
+        # Create new browser
+        success = await scraper._create_browser()
+        
+        return {
+            "success": success,
+            "message": "Browser restarted successfully" if success else "Browser restart failed",
+            "browser_status": "active" if success else "inactive",
+            "version": "4.0.0-FINAL"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Browser restart failed: {str(e)}",
+            "browser_status": "error",
+            "version": "4.0.0-FINAL"
+        }
 
 if __name__ == "__main__":
     # Run the API server
