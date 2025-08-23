@@ -1,29 +1,36 @@
-# Railway Contact Scraper - Fixed Dependencies
-# All critical bugs resolved - ready for production deployment
+# Railway Contact Scraper - Google API Version
+# No browser dependencies - pure API approach
 
-# Core FastAPI framework
+# Core FastAPI and web framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-pydantic==2.5.0
-python-multipart==0.0.6
 
-# HTTP client (httpx replaces aiohttp for better Railway compatibility)
+# HTTP client for API calls
 httpx==0.25.2
 requests==2.31.0
 
-# HTML parsing and web scraping
+# HTML parsing (lightweight, no browser needed)
 beautifulsoup4==4.12.2
 lxml==4.9.3
-html5lib==1.1
-cssselect==1.2.0
 
-# Browser automation (optional - graceful fallback if unavailable)
-DrissionPage>=4.0.0
+# Data processing and validation
+pydantic==2.5.0
+sqlite3  # Built into Python
 
-# Utility libraries
-urllib3==2.1.0
+# Async support
+asyncio  # Built into Python
 
-# Note: All version numbers tested and verified for Railway deployment
-# JavaScript is now ENABLED in browser automation
-# HTTPx syntax properly implemented throughout codebase
-# Advanced deduplication with fuzzy matching restored
+# Text processing and similarity
+difflib  # Built into Python
+
+# Environment and utilities
+python-dotenv==1.0.0
+
+# Development and testing (optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# No browser automation dependencies needed!
+# DrissionPage - REMOVED (no longer needed)
+# selenium - REMOVED (no longer needed)
+# playwright - REMOVED (no longer needed)
