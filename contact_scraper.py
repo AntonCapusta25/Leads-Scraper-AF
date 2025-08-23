@@ -579,17 +579,17 @@ class RailwayContactScraper:
                     if response.status_code == 200:
                         html = response.text  # httpx decodes automatically
                         soup = BeautifulSoup(html, 'html.parser')
-                            
-                            # Extract company website URLs
-                            company_urls = self._extract_company_urls(soup, params.company)
-                            
-                            # Scrape the actual company websites
-                            for url in company_urls[:3]:  # Limit URLs
-                                try:
-                                    contacts = await self._scrape_company_page(url, params)
-                                    results.extend(contacts)
-                                except:
-                                    continue
+                        
+                        # Extract company website URLs
+                        company_urls = self._extract_company_urls(soup, params.company)
+                        
+                        # Scrape the actual company websites
+                        for url in company_urls[:3]:  # Limit URLs
+                            try:
+                                contacts = await self._scrape_company_page(url, params)
+                                results.extend(contacts)
+                            except:
+                                continue
                         
                 except Exception as e:
                     logger.debug(f"Company search failed: {e}")
@@ -608,19 +608,18 @@ class RailwayContactScraper:
             
             await self._respectful_delay()
             
-            async with self.session.get(url) as response:
-                if response.status_code == 200:
-                    html = await response.aread()
-                    html = html.decode('utf-8', errors='ignore')
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Look for team/about sections
-                    team_sections = soup.find_all(['div', 'section'], 
-                        class_=re.compile(r'(team|about|staff|leadership|management)', re.I))
-                    
-                    for section in team_sections[:3]:  # Limit sections
-                        contacts = self._extract_contacts_from_section(section, url, params)
-                        results.extend(contacts)
+            response = await self.session.get(url)
+            if response.status_code == 200:
+                html = response.text  # httpx decodes automatically  
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Look for team/about sections
+                team_sections = soup.find_all(['div', 'section'], 
+                    class_=re.compile(r'(team|about|staff|leadership|management)', re.I))
+                
+                for section in team_sections[:3]:  # Limit sections
+                    contacts = self._extract_contacts_from_section(section, url, params)
+                    results.extend(contacts)
             
             return results[:5]  # Limit results per page
             
@@ -811,20 +810,19 @@ class RailwayContactScraper:
             
             await self._respectful_delay()
             
-            async with self.session.get(search_url) as response:
-                if response.status_code == 200:
-                    html = await response.aread()
-                    html = html.decode('utf-8', errors='ignore')
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Extract LinkedIn profile URLs
-                    linkedin_urls = self._extract_linkedin_urls(soup)
-                    
-                    # Process LinkedIn URLs to extract basic information
-                    for url in linkedin_urls[:5]:  # Limit URLs
-                        contact = self._create_contact_from_linkedin_url(url, params)
-                        if contact:
-                            results.append(contact)
+            response = await self.session.get(search_url)
+            if response.status_code == 200:
+                html = response.text  # httpx decodes automatically
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Extract LinkedIn profile URLs
+                linkedin_urls = self._extract_linkedin_urls(soup)
+                
+                # Process LinkedIn URLs to extract basic information
+                for url in linkedin_urls[:5]:  # Limit URLs
+                    contact = self._create_contact_from_linkedin_url(url, params)
+                    if contact:
+                        results.append(contact)
             
             return results
             
@@ -1111,19 +1109,346 @@ class RailwayContactScraper:
         return min(score, 1.0)
     
     def _deduplicate_real_contacts(self, contacts: List[ContactResult]) -> List[ContactResult]:
-        """Simple deduplication for real contacts"""
-        seen_contacts = set()
-        unique_contacts = []
-        
-        for contact in contacts:
-            # Create identifier for deduplication
-            identifier = f"{contact.name.lower()}|{(contact.email or '').lower()}|{(contact.company or '').lower()}"
+        """Advanced deduplication with fuzzy matching and data merging"""
+        try:
+            if not contacts:
+                return []
             
-            if identifier not in seen_contacts:
-                seen_contacts.add(identifier)
-                unique_contacts.append(contact)
-        
-        return unique_contacts
+            logger.info(f"🔄 Starting advanced deduplication for {len(contacts)} contacts...")
+            
+            # Step 1: Group potentially duplicate contacts
+            duplicate_groups = self._group_duplicates(contacts)
+            
+            # Step 2: Merge duplicates within each group
+            deduplicated_contacts = []
+            for group in duplicate_groups:
+                if len(group) == 1:
+                    deduplicated_contacts.append(group[0])
+                else:
+                    # Merge multiple contacts into one
+                    merged_contact = self._merge_contacts(group)
+                    deduplicated_contacts.append(merged_contact)
+            
+            # Step 3: Final validation and cleanup
+            final_contacts = self._final_dedup_validation(deduplicated_contacts)
+            
+            removed_count = len(contacts) - len(final_contacts)
+            logger.info(f"✅ Advanced deduplication complete: {removed_count} duplicates removed, {len(final_contacts)} unique contacts")
+            
+            return final_contacts
+            
+        except Exception as e:
+            logger.error(f"❌ Advanced deduplication failed: {e}")
+            # Fallback to basic deduplication
+            return self._basic_deduplicate(contacts)
+    
+    def _group_duplicates(self, results: List[ContactResult]) -> List[List[ContactResult]]:
+        """Group contacts that are likely duplicates using fuzzy matching"""
+        try:
+            groups = []
+            processed = set()
+            
+            for i, contact in enumerate(results):
+                if i in processed:
+                    continue
+                
+                # Start a new group with this contact
+                current_group = [contact]
+                processed.add(i)
+                
+                # Find all other contacts that match this one
+                for j, other_contact in enumerate(results[i+1:], i+1):
+                    if j in processed:
+                        continue
+                    
+                    if self._are_duplicates(contact, other_contact):
+                        current_group.append(other_contact)
+                        processed.add(j)
+                
+                groups.append(current_group)
+            
+            return groups
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Grouping duplicates failed: {e}")
+            return [[contact] for contact in results]
+    
+    def _are_duplicates(self, contact1: ContactResult, contact2: ContactResult) -> bool:
+        """Determine if two contacts are duplicates using multiple criteria"""
+        try:
+            # Exact email match (highest priority)
+            if contact1.email and contact2.email:
+                if contact1.email.lower() == contact2.email.lower():
+                    return True
+            
+            # Exact LinkedIn URL match
+            if contact1.linkedin_url and contact2.linkedin_url:
+                if self._normalize_linkedin_url(contact1.linkedin_url) == self._normalize_linkedin_url(contact2.linkedin_url):
+                    return True
+            
+            # Name + Company similarity (fuzzy matching)
+            name_similarity = self._calculate_name_similarity(contact1.name, contact2.name)
+            company_similarity = self._calculate_company_similarity(contact1.company, contact2.company)
+            
+            # High name similarity + same/similar company = duplicate
+            if name_similarity >= 0.85 and company_similarity >= 0.8:
+                return True
+            
+            # Very high name similarity alone
+            if name_similarity >= 0.95:
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Duplicate check failed: {e}")
+            return False
+    
+    def _calculate_name_similarity(self, name1: Optional[str], name2: Optional[str]) -> float:
+        """Calculate similarity between two names using fuzzy matching"""
+        try:
+            if not name1 or not name2:
+                return 0.0
+            
+            # Normalize names
+            name1_clean = self._normalize_name(name1)
+            name2_clean = self._normalize_name(name2)
+            
+            if not name1_clean or not name2_clean:
+                return 0.0
+            
+            # Exact match
+            if name1_clean == name2_clean:
+                return 1.0
+            
+            # Check if names contain each other
+            if name1_clean in name2_clean or name2_clean in name1_clean:
+                return 0.9
+            
+            # Fuzzy string similarity
+            return SequenceMatcher(None, name1_clean, name2_clean).ratio()
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Name similarity calculation failed: {e}")
+            return 0.0
+    
+    def _calculate_company_similarity(self, company1: Optional[str], company2: Optional[str]) -> float:
+        """Calculate similarity between two companies using fuzzy matching"""
+        try:
+            if not company1 or not company2:
+                return 0.0
+            
+            # Normalize company names
+            comp1_clean = self._normalize_company_name(company1)
+            comp2_clean = self._normalize_company_name(company2)
+            
+            if not comp1_clean or not comp2_clean:
+                return 0.0
+            
+            # Exact match
+            if comp1_clean == comp2_clean:
+                return 1.0
+            
+            # Check if one is contained in the other
+            if comp1_clean in comp2_clean or comp2_clean in comp1_clean:
+                return 0.9
+            
+            # Fuzzy string similarity
+            return SequenceMatcher(None, comp1_clean, comp2_clean).ratio()
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Company similarity calculation failed: {e}")
+            return 0.0
+    
+    def _merge_contacts(self, contacts: List[ContactResult]) -> ContactResult:
+        """Merge multiple contact records into a single, comprehensive record"""
+        try:
+            if len(contacts) == 1:
+                return contacts[0]
+            
+            # Choose the contact with highest confidence as base
+            base_contact = max(contacts, key=lambda c: c.confidence_score)
+            
+            # Merge information from other contacts
+            merged_data = asdict(base_contact)
+            
+            for contact in contacts:
+                contact_data = asdict(contact)
+                
+                # Fill in missing information from other contacts
+                for field, value in contact_data.items():
+                    if value and not merged_data.get(field):
+                        merged_data[field] = value
+                
+                # Choose the best email (professional > generic)
+                if contact.email and contact.email != merged_data.get('email'):
+                    current_email = merged_data.get('email', '')
+                    if self._is_better_email(contact.email, current_email):
+                        merged_data['email'] = contact.email
+                
+                # Choose the most complete position
+                if contact.position and len(contact.position) > len(merged_data.get('position', '')):
+                    merged_data['position'] = contact.position
+                
+                # Combine sources
+                if contact.source and contact.source != merged_data.get('source'):
+                    current_source = merged_data.get('source', '')
+                    merged_data['source'] = f"{current_source}, {contact.source}".strip(', ')
+            
+            # Update confidence score (average of all contacts, weighted by data completeness)
+            total_confidence = sum(c.confidence_score for c in contacts)
+            data_completeness_bonus = len([v for v in merged_data.values() if v]) * 0.02
+            merged_data['confidence_score'] = min(1.0, (total_confidence / len(contacts)) + data_completeness_bonus)
+            
+            return ContactResult(**merged_data)
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Contact merging failed: {e}")
+            # Return the contact with highest confidence
+            return max(contacts, key=lambda c: c.confidence_score)
+    
+    def _final_dedup_validation(self, contacts: List[ContactResult]) -> List[ContactResult]:
+        """Final validation to catch any remaining duplicates"""
+        try:
+            # Quick check for exact matches that might have been missed
+            seen_emails = set()
+            seen_linkedin = set()
+            final_contacts = []
+            
+            for contact in contacts:
+                skip = False
+                
+                # Check email
+                if contact.email:
+                    email_normalized = contact.email.lower().strip()
+                    if email_normalized in seen_emails:
+                        skip = True
+                    else:
+                        seen_emails.add(email_normalized)
+                
+                # Check LinkedIn URL
+                if contact.linkedin_url and not skip:
+                    linkedin_normalized = self._normalize_linkedin_url(contact.linkedin_url)
+                    if linkedin_normalized in seen_linkedin:
+                        skip = True
+                    else:
+                        seen_linkedin.add(linkedin_normalized)
+                
+                if not skip:
+                    final_contacts.append(contact)
+            
+            return final_contacts
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Final validation failed: {e}")
+            return contacts
+    
+    def _basic_deduplicate(self, results: List[ContactResult]) -> List[ContactResult]:
+        """Fallback basic deduplication method"""
+        try:
+            seen = set()
+            unique_results = []
+            
+            for result in results:
+                # Create identifier for deduplication
+                identifier_parts = []
+                
+                if result.email:
+                    identifier_parts.append(result.email.lower())
+                else:
+                    if result.name:
+                        identifier_parts.append(result.name.lower())
+                    if result.company:
+                        identifier_parts.append(result.company.lower())
+                
+                identifier = "|".join(identifier_parts)
+                
+                if identifier and identifier not in seen:
+                    seen.add(identifier)
+                    unique_results.append(result)
+            
+            return unique_results
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Basic deduplication failed: {e}")
+            return results
+    
+    # Normalization helper methods
+    def _normalize_name(self, name: str) -> str:
+        """Normalize name for comparison"""
+        try:
+            if not name:
+                return ""
+            
+            # Remove extra whitespace, convert to lowercase
+            normalized = re.sub(r'\s+', ' ', name.strip().lower())
+            return normalized
+            
+        except:
+            return name.lower() if name else ""
+    
+    def _normalize_company_name(self, company: str) -> str:
+        """Normalize company name for comparison"""
+        try:
+            if not company:
+                return ""
+            
+            normalized = company.lower().strip()
+            
+            # Remove common company suffixes
+            suffixes = ['inc.', 'inc', 'corp.', 'corp', 'ltd.', 'ltd', 'llc', 'llp', 
+                       'co.', 'co', 'company', 'corporation', 'limited']
+            
+            for suffix in suffixes:
+                if normalized.endswith(' ' + suffix):
+                    normalized = normalized[:-len(suffix)-1].strip()
+                elif normalized.endswith(suffix):
+                    normalized = normalized[:-len(suffix)].strip()
+            
+            # Remove extra whitespace
+            normalized = re.sub(r'\s+', ' ', normalized)
+            
+            return normalized
+            
+        except:
+            return company.lower() if company else ""
+    
+    def _normalize_linkedin_url(self, url: str) -> str:
+        """Normalize LinkedIn URL for comparison"""
+        try:
+            if not url:
+                return ""
+            
+            # Extract the profile ID from LinkedIn URL
+            match = re.search(r'/in/([^/?]+)', url.lower())
+            return match.group(1) if match else url.lower()
+            
+        except:
+            return url.lower() if url else ""
+    
+    def _is_better_email(self, email1: str, email2: str) -> bool:
+        """Determine which email is better (professional vs generic)"""
+        try:
+            if not email2:  # If no existing email, new one is better
+                return True
+            
+            # Prefer professional emails over generic ones
+            generic_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com']
+            
+            email1_is_generic = any(domain in email1.lower() for domain in generic_domains)
+            email2_is_generic = any(domain in email2.lower() for domain in generic_domains)
+            
+            # If one is professional and other is generic, prefer professional
+            if not email1_is_generic and email2_is_generic:
+                return True
+            elif email1_is_generic and not email2_is_generic:
+                return False
+            
+            # If both are same type, prefer longer email (likely more complete)
+            return len(email1) > len(email2)
+            
+        except:
+            return False
     
     def _get_text_around_name(self, name: str, text: str, window: int = 100) -> str:
         """Get text context around a name mention"""
@@ -1223,24 +1548,23 @@ class RailwayContactScraper:
         try:
             await self._respectful_delay()
             
-            async with self.session.get(url) as response:
-                if response.status_code == 200:
-                    html = await response.aread()
-                    html = html.decode('utf-8', errors='ignore')
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Extract contacts from directory page
-                    # This would be customized based on each directory's structure
-                    contacts = []
-                    
-                    # Basic extraction for common directory patterns
-                    text_content = soup.get_text()
-                    contact_info = self._extract_contact_information(text_content, url, params)
-                    
-                    if contact_info:
-                        contacts.append(ContactResult(**contact_info))
-                    
-                    return contacts
+            response = await self.session.get(url)
+            if response.status_code == 200:
+                html = response.text  # httpx decodes automatically
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Extract contacts from directory page
+                # This would be customized based on each directory's structure
+                contacts = []
+                
+                # Basic extraction for common directory patterns
+                text_content = soup.get_text()
+                contact_info = self._extract_contact_information(text_content, url, params)
+                
+                if contact_info:
+                    contacts.append(ContactResult(**contact_info))
+                
+                return contacts
             
             return []
             
