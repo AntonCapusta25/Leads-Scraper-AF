@@ -274,13 +274,14 @@
             showStatus('info', '🔍 Searching... This may take a moment.');
 
             try {
-                // The backend now returns the array directly
                 const results = await apiRequest('/search', {
                     method: 'POST',
                     body: JSON.stringify(searchParams)
                 });
                 
-                currentResults = results || [];
+                // --- FIXED: Access the 'contacts' array inside the response object ---
+                currentResults = results.contacts || []; 
+                
                 displayResults(currentResults);
                 showStatus('success', `✅ Found ${currentResults.length} contacts.`);
 
@@ -294,8 +295,10 @@
 
         // --- UI & Display Functions ---
         function displayResults(contacts) {
+            // --- FIXED: Added a check to ensure 'contacts' is an array ---
             if (!Array.isArray(contacts)) {
                 console.error("Invalid data for display:", contacts);
+                showStatus('error', 'Received invalid data from the server.');
                 contacts = [];
             }
 
@@ -319,7 +322,6 @@
             if (confidence >= 80) confidenceClass = 'bg-green-500';
             else if (confidence >= 60) confidenceClass = 'bg-yellow-500';
 
-            // --- FIXED: Added logic for a generic "View Source" button ---
             const sourceLinkHTML = (contact.profile_url && !contact.linkedin_url) 
                 ? `<a href="${contact.profile_url}" target="_blank" class="flex-1 text-center bg-gray-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-600 transition">View Source</a>`
                 : '';
