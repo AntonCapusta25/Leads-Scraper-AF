@@ -807,7 +807,12 @@ class RailwayContactScraper:
             results = []
             
             # Use alternative search to find LinkedIn profiles
-            linkedin_search = f"{params.position or ''} {params.company or ''} {params.industry or ''} site:linkedin.com/in"
+            search_parts = []
+            if params.position: search_parts.append(f'"{params.position}"')
+            if params.company: search_parts.append(f'"{params.company}"')
+            if params.industry: search_parts.append(f'"{params.industry}"')
+            search_parts.append("site:linkedin.com/in")
+            linkedin_search = " ".join(search_parts)
             
             # Use DuckDuckGo to avoid Google bot detection
             search_url = f"https://duckduckgo.com/html/?q={quote(linkedin_search)}"
