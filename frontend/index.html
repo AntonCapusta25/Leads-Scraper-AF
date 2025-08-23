@@ -274,14 +274,13 @@
             showStatus('info', '🔍 Searching... This may take a moment.');
 
             try {
+                // The backend now returns the array directly
                 const results = await apiRequest('/search', {
                     method: 'POST',
                     body: JSON.stringify(searchParams)
                 });
                 
-                // --- FIXED: Access the 'contacts' array inside the response object ---
-                currentResults = results.contacts || []; 
-                
+                currentResults = results || [];
                 displayResults(currentResults);
                 showStatus('success', `✅ Found ${currentResults.length} contacts.`);
 
@@ -295,10 +294,8 @@
 
         // --- UI & Display Functions ---
         function displayResults(contacts) {
-            // --- FIXED: Added a check to ensure 'contacts' is an array ---
             if (!Array.isArray(contacts)) {
-                console.error("Invalid data received for display:", contacts);
-                showStatus('error', 'Received invalid data from the server.');
+                console.error("Invalid data for display:", contacts);
                 contacts = [];
             }
 
@@ -321,6 +318,11 @@
             let confidenceClass = 'bg-red-500';
             if (confidence >= 80) confidenceClass = 'bg-green-500';
             else if (confidence >= 60) confidenceClass = 'bg-yellow-500';
+
+            // --- FIXED: Added logic for a generic "View Source" button ---
+            const sourceLinkHTML = (contact.profile_url && !contact.linkedin_url) 
+                ? `<a href="${contact.profile_url}" target="_blank" class="flex-1 text-center bg-gray-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-600 transition">View Source</a>`
+                : '';
 
             return `
                 <div class="contact-card bg-white rounded-xl shadow-md overflow-hidden flex flex-col">
@@ -345,6 +347,7 @@
                         <div class="flex items-center space-x-2">
                             ${contact.linkedin_url ? `<a href="${contact.linkedin_url}" target="_blank" class="flex-1 text-center bg-blue-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600 transition">LinkedIn</a>` : ''}
                             ${contact.email && contact.email !== 'not-found' ? `<a href="mailto:${contact.email}" class="flex-1 text-center bg-green-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-green-600 transition">Email</a>` : ''}
+                            ${sourceLinkHTML}
                         </div>
                     </div>
                 </div>
@@ -355,7 +358,7 @@
             searchBtn.disabled = isLoading;
             if (isLoading) {
                 searchBtn.classList.add('loading', 'opacity-75');
-                searchBtn.innerHTML = `<span></span>`; // Clear text for spinner
+                searchBtn.innerHTML = `<span></span>`;
             } else {
                 searchBtn.classList.remove('loading', 'opacity-75');
                 searchBtn.innerHTML = 'Search Contacts';
