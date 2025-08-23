@@ -73,52 +73,50 @@
                             <div class="space-y-5">
                                 <div class="form-group">
                                     <label for="query" class="block text-sm font-medium text-gray-700 mb-1">Primary Query</label>
-                                    <input type="text" id="query" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 'Head Chef' or 'Restaurant Owner'" required>
+                                    <input type="text" id="query" name="query" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 'Head Chef' or 'Restaurant Owner'" required>
                                 </div>
                                 
                                 <!-- Industry Dropdown -->
                                 <div class="form-group">
                                     <label for="industry" class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
                                     <div class="relative dropdown" id="industryDropdown">
-                                        <!-- FIXED: Added .dropdown-button class -->
-                                        <button type="button" class="dropdown-button w-full p-3 border border-gray-300 rounded-lg text-left flex justify-between items-center bg-white" onclick="toggleDropdown('industryDropdown')">
+                                        <button type="button" class="dropdown-button w-full p-3 border border-gray-300 rounded-lg text-left flex justify-between items-center bg-white">
                                             <span>Select Industry...</span><span class="text-xs">▼</span>
                                         </button>
                                         <div class="dropdown-menu absolute z-10 w-full bg-white rounded-lg shadow-lg border mt-1 max-h-60 overflow-y-auto">
-                                            <input type="text" class="w-full p-2 border-b sticky top-0" placeholder="Search industries..." onkeyup="filterDropdown('industryDropdown', this.value)">
-                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" onclick="selectDropdownItem('industryDropdown', '', 'Any Industry')">Any Industry</div>
-                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" onclick="selectDropdownItem('industryDropdown', 'technology', 'Technology')">Technology</div>
-                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" onclick="selectDropdownItem('industryDropdown', 'finance', 'Finance')">Finance</div>
-                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" onclick="selectDropdownItem('industryDropdown', 'healthcare', 'Healthcare')">Healthcare</div>
-                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" onclick="selectDropdownItem('industryDropdown', 'hospitality', 'Hospitality & Food Service')">Hospitality & Food Service</div>
+                                            <input type="text" class="dropdown-search w-full p-2 border-b sticky top-0" placeholder="Search industries...">
+                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" data-value="">Any Industry</div>
+                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" data-value="technology">Technology</div>
+                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" data-value="finance">Finance</div>
+                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" data-value="healthcare">Healthcare</div>
+                                            <div class="dropdown-item p-2 hover:bg-indigo-50 cursor-pointer" data-value="hospitality">Hospitality & Food Service</div>
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <!-- FIXED: Added missing Position and Company fields -->
                                 <div class="form-group">
                                     <label for="position" class="block text-sm font-medium text-gray-700 mb-1">Position (Optional)</label>
-                                    <input type="text" id="position" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Head Chef">
+                                    <input type="text" id="position" name="position" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Head Chef">
                                 </div>
                                 <div class="form-group">
                                     <label for="company" class="block text-sm font-medium text-gray-700 mb-1">Company (Optional)</label>
-                                    <input type="text" id="company" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Google">
+                                    <input type="text" id="company" name="company" autocomplete="organization" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Google">
                                 </div>
 
 
                                 <div class="form-group">
                                     <label for="country" class="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                                    <input type="text" id="country" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Netherlands">
+                                    <input type="text" id="country" name="country" autocomplete="country-name" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Netherlands">
                                 </div>
 
                                 <div class="form-group">
                                     <label for="keywords" class="block text-sm font-medium text-gray-700 mb-1">Keywords (Optional)</label>
-                                    <input type="text" id="keywords" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., site:linkedin.com/in">
+                                    <input type="text" id="keywords" name="keywords" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., site:linkedin.com/in">
                                 </div>
                                 
                                 <div class="form-group">
                                     <label for="maxResults" class="block text-sm font-medium text-gray-700 mb-1">Max Results</label>
-                                    <select id="maxResults" class="w-full p-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    <select id="maxResults" name="max_results" class="w-full p-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                                         <option value="10">10</option>
                                         <option value="20" selected>20</option>
                                         <option value="30">30</option>
@@ -156,7 +154,7 @@
         // --- Configuration ---
         const API_BASE_URL = 'https://web-production-1a49.up.railway.app';
         let currentResults = [];
-        let dropdownData = {}; // Object to store selected dropdown values
+        let dropdownData = {};
 
         // --- DOM Elements ---
         const searchForm = document.getElementById('searchForm');
@@ -168,23 +166,46 @@
         document.addEventListener('DOMContentLoaded', () => {
             checkAPIStatus();
             initializeDropdowns();
+            initializeEventListeners();
         });
-        searchForm.addEventListener('submit', handleSearch);
-        document.addEventListener('click', (event) => {
-            if (!event.target.closest('.dropdown')) {
-                closeAllDropdowns();
-            }
-        });
+
+        function initializeEventListeners() {
+            searchForm.addEventListener('submit', handleSearch);
+            
+            document.addEventListener('click', (event) => {
+                if (!event.target.closest('.dropdown')) {
+                    closeAllDropdowns();
+                }
+            });
+        }
 
         // --- Dropdown Functions ---
         function initializeDropdowns() {
             dropdownData = { industryDropdown: '' };
+            
+            document.querySelectorAll('.dropdown').forEach(dropdown => {
+                const button = dropdown.querySelector('.dropdown-button');
+                const items = dropdown.querySelectorAll('.dropdown-item');
+                const searchInput = dropdown.querySelector('.dropdown-search');
+
+                button.addEventListener('click', () => toggleDropdown(dropdown.id));
+
+                items.forEach(item => {
+                    item.addEventListener('click', () => {
+                        selectDropdownItem(dropdown.id, item.dataset.value, item.textContent);
+                    });
+                });
+
+                if (searchInput) {
+                    searchInput.addEventListener('keyup', () => filterDropdown(dropdown.id, searchInput.value));
+                }
+            });
         }
 
         function toggleDropdown(dropdownId) {
             const dropdown = document.getElementById(dropdownId);
             const menu = dropdown.querySelector('.dropdown-menu');
-            closeAllDropdowns(dropdownId); // Close others
+            closeAllDropdowns(dropdownId);
             menu.classList.toggle('show');
         }
 
@@ -258,7 +279,9 @@
                     body: JSON.stringify(searchParams)
                 });
                 
-                currentResults = results || [];
+                // --- FIXED: Access the 'contacts' array inside the response object ---
+                currentResults = results.contacts || []; 
+                
                 displayResults(currentResults);
                 showStatus('success', `✅ Found ${currentResults.length} contacts.`);
 
@@ -272,6 +295,13 @@
 
         // --- UI & Display Functions ---
         function displayResults(contacts) {
+            // --- FIXED: Added a check to ensure 'contacts' is an array ---
+            if (!Array.isArray(contacts)) {
+                console.error("Invalid data received for display:", contacts);
+                showStatus('error', 'Received invalid data from the server.');
+                contacts = [];
+            }
+
             if (contacts.length === 0) {
                 resultsContent.innerHTML = `
                     <div class="text-center py-20">
@@ -287,7 +317,7 @@
         }
 
         function createContactCard(contact) {
-            const confidence = Math.round(contact.confidence_score * 100);
+            const confidence = Math.round((contact.confidence_score || 0) * 100);
             let confidenceClass = 'bg-red-500';
             if (confidence >= 80) confidenceClass = 'bg-green-500';
             else if (confidence >= 60) confidenceClass = 'bg-yellow-500';
