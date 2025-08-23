@@ -330,39 +330,30 @@ class RailwayContactScraper:
         return final_results
     
     async def _real_browser_scraping(self, params: SearchParameters) -> List[ContactResult]:
-        """REAL browser-based scraping with patience and retries"""
+        """REAL browser-based scraping with universal Google search"""
         if not self._browser_available:
             return []
         
         try:
             results = []
             
-            # Build professional search queries
-            search_queries = self._build_professional_queries(params)
+            # Build ONE universal search query (user-controlled)
+            search_query = self._build_universal_search_query(params)
+            search_url = f"https://www.google.com/search?q={quote(search_query)}&num=15"
             
-            for i, query in enumerate(search_queries[:3]):  # Limit to 3 queries for Railway
-                try:
-                    logger.info(f"🔍 Browser query {i+1}: {query}")
-                    
-                    # Apply respectful rate limiting
-                    await self._respectful_delay()
-                    
-                    # Navigate with patience
-                    success = await self._patient_browser_navigation(query)
-                    if not success:
-                        continue
-                    
-                    # Extract real contacts
-                    page_results = await self._extract_real_contacts_from_page(params)
-                    results.extend(page_results)
-                    
-                    # Stop if we have enough results
-                    if len(results) >= params.max_results:
-                        break
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ Browser query {i+1} failed: {e}")
-                    continue
+            logger.info(f"🔍 Browser universal search: {search_query}")
+            
+            # Apply respectful rate limiting
+            await self._respectful_delay()
+            
+            # Navigate with patience
+            success = await self._patient_browser_navigation(search_url)
+            if not success:
+                return []
+            
+            # Extract real contacts from current page
+            page_results = await self._extract_real_contacts_from_page(params)
+            results.extend(page_results)
             
             return results
             
@@ -560,44 +551,44 @@ class RailwayContactScraper:
             return []
     
     async def _scrape_company_websites(self, params: SearchParameters) -> List[ContactResult]:
-        """Scrape company websites for real contact information"""
+        """Scrape company websites using universal search query"""
         try:
             results = []
             
-            # Build company search URLs
-            company_search_terms = [
-                f"{params.company} about us",
-                f"{params.company} team",
-                f"{params.company} leadership",
-                f"{params.company} contact"
-            ]
+            if not params.company:
+                return results
             
-            for search_term in company_search_terms[:2]:  # Limit for Railway
-                try:
-                    # Use DuckDuckGo as alternative to Google (less bot detection)
-                    search_url = f"https://duckduckgo.com/html/?q={quote(search_term)}"
+            # Use universal search query to find company pages
+            # Create modified params to search for company pages specifically
+            company_params = SearchParameters(
+                company=params.company,
+                keywords="team OR about OR leadership OR contact OR staff"
+            )
+            
+            search_query = self._build_universal_search_query(company_params)
+            search_url = f"https://duckduckgo.com/html/?q={quote(search_query)}"
+            
+            try:
+                await self._respectful_delay()
+                
+                response = await self.session.get(search_url)
+                if response.status_code == 200:
+                    html = response.text
+                    soup = BeautifulSoup(html, 'html.parser')
                     
-                    await self._respectful_delay()
+                    # Extract company website URLs
+                    company_urls = self._extract_company_urls(soup, params.company)
                     
-                    response = await self.session.get(search_url)
-                    if response.status_code == 200:
-                        html = response.text  # httpx decodes automatically
-                        soup = BeautifulSoup(html, 'html.parser')
+                    # Scrape the actual company websites
+                    for url in company_urls[:3]:  # Limit URLs
+                        try:
+                            contacts = await self._scrape_company_page(url, params)
+                            results.extend(contacts)
+                        except:
+                            continue
                         
-                        # Extract company website URLs
-                        company_urls = self._extract_company_urls(soup, params.company)
-                        
-                        # Scrape the actual company websites
-                        for url in company_urls[:3]:  # Limit URLs
-                            try:
-                                contacts = await self._scrape_company_page(url, params)
-                                results.extend(contacts)
-                            except:
-                                continue
-                        
-                except Exception as e:
-                    logger.debug(f"Company search failed: {e}")
-                    continue
+            except Exception as e:
+                logger.debug(f"Company search failed: {e}")
             
             return results
             
@@ -807,12 +798,7 @@ class RailwayContactScraper:
             results = []
             
             # Use alternative search to find LinkedIn profiles
-            search_parts = []
-            if params.position: search_parts.append(f'"{params.position}"')
-            if params.company: search_parts.append(f'"{params.company}"')
-            if params.industry: search_parts.append(f'"{params.industry}"')
-            search_parts.append("site:linkedin.com/in")
-            linkedin_search = " ".join(search_parts)
+            linkedin_search = f"{params.position or ''} {params.company or ''} {params.industry or ''} site:linkedin.com/in"
             
             # Use DuckDuckGo to avoid Google bot detection
             search_url = f"https://duckduckgo.com/html/?q={quote(linkedin_search)}"
@@ -919,29 +905,39 @@ class RailwayContactScraper:
             logger.debug(f"API scraping error: {e}")
             return []
     
-    # Helper methods for real data extraction
-    def _build_professional_queries(self, params: SearchParameters) -> List[str]:
-        """Build professional search queries for real data"""
-        queries = []
-        base_url = "https://www.google.com/search?q="
-        
-        # Query 1: Position + Company + Contact
-        if params.position and params.company:
-            query = f'"{params.position}" "{params.company}" (email OR contact OR linkedin)'
-            queries.append(base_url + quote(query))
-        
-        # Query 2: Industry + Position + Location
-        if params.industry and params.position:
-            location = params.country or ""
-            query = f'"{params.position}" "{params.industry}" {location} (email OR linkedin OR "about us")'
-            queries.append(base_url + quote(query))
-        
-        # Query 3: Company + Team/Leadership
-        if params.company:
-            query = f'"{params.company}" (team OR leadership OR "about us" OR executives)'
-            queries.append(base_url + quote(query))
-        
-        return queries
+    def _build_universal_search_query(self, params: SearchParameters) -> str:
+        """Build a robust, universal search query for Google - USER CONTROLLED"""
+        query_parts = []
+
+        # Add core search terms
+        if params.position: 
+            query_parts.append(f'"{params.position}"')
+        if params.company: 
+            query_parts.append(f'"{params.company}"')
+        if params.industry: 
+            query_parts.append(f'"{params.industry}"')
+
+        # Add location
+        if params.city and params.country:
+            query_parts.append(f'"{params.city}, {params.country}"')
+        elif params.country:
+            query_parts.append(f'"{params.country}"')
+        elif params.city:
+            query_parts.append(f'"{params.city}"')
+
+        # IMPORTANT: Add user-defined keywords (can include "site:" operators)
+        if params.keywords:
+            query_parts.append(params.keywords)
+
+        # Add terms to find people/contact info (unless user specified site: operator)
+        if not params.keywords or 'site:' not in params.keywords:
+            query_parts.append('(contact OR email OR "about us" OR team OR leadership)')
+
+        # Exclude job boards (unless searching specific site)
+        if not params.keywords or 'site:' not in params.keywords:
+            query_parts.append('-jobs -careers -indeed -glassdoor')
+
+        return " ".join(query_parts)
     
     def _extract_contact_information(self, text: str, url: str, params: SearchParameters) -> Optional[Dict]:
         """Extract real contact information from text"""
@@ -1649,9 +1645,9 @@ class SearchResponse(BaseModel):
 
 # FastAPI Application
 app = FastAPI(
-    title="Railway Contact Scraper - HTTP-First",
-    description="Professional contact scraper with HTTP-first architecture and browser fallback (Railway optimized)",
-    version="6.1.0-HTTP-FIRST"
+    title="Railway Contact Scraper - Universal Search",
+    description="Professional contact scraper with universal Google search (user-controllable scope) and Railway optimization",
+    version="6.2.0-UNIVERSAL-SEARCH"
 )
 
 # CORS
@@ -1663,7 +1659,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global scraper
+# Global scraper - HTTP-first with browser fallback
 scraper = RailwayContactScraper(enable_browser=True)
 
 @app.on_event("startup")
@@ -1678,20 +1674,26 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     return {
-        "message": "Railway Contact Scraper - HTTP-First with Browser Fallback",
+        "message": "Railway Contact Scraper - Universal Google Search",
         "status": "healthy",
-        "version": "6.1.0-HTTP-FIRST",
+        "version": "6.2.0-UNIVERSAL-SEARCH",
         "architecture": "HTTP-first with browser fallback",
+        "search_scope": "Universal Google search (user-controllable)",
         "features": [
-            "PRIMARY: HTTP-based REAL website scraping",
-            "SECONDARY: Professional directory integration", 
+            "PRIMARY: Universal Google search via HTTP",
+            "SECONDARY: Company website scraping", 
+            "TERTIARY: Professional directory integration",
             "FALLBACK: Browser automation (if needed)",
-            "LinkedIn profile discovery",
-            "Company website contact extraction",
-            "Respectful rate limiting",
+            "USER-CONTROLLED: Use 'keywords' parameter to specify sites",
             "Advanced fuzzy deduplication",
-            "REAL contact data only - optimized for Railway"
-        ]
+            "REAL contact data only - Railway optimized"
+        ],
+        "examples": {
+            "search_all_google": "Default behavior - searches entire web",
+            "search_linkedin_only": "Add 'keywords': 'site:linkedin.com/in'",
+            "search_company_site": "Add 'keywords': 'site:company.com'",
+            "search_multiple_sites": "Add 'keywords': 'site:linkedin.com OR site:company.com'"
+        }
     }
 
 @app.get("/health")
@@ -1699,11 +1701,12 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "6.1.0-HTTP-FIRST", 
+        "version": "6.2.0-UNIVERSAL-SEARCH", 
         "architecture": "HTTP-first with browser fallback",
+        "search_scope": "Universal Google search (user-controllable)",
         "http_session_ready": scraper.session is not None,
         "browser_available": scraper._browser_available,
-        "data_quality": "REAL contacts only - HTTP-first approach",
+        "data_quality": "REAL contacts - universal search",
         "railway_optimized": True
     }
 
@@ -1772,22 +1775,30 @@ async def test_browser():
 
 @app.get("/api/scraper-status")
 async def get_scraper_status():
-    """Get detailed scraper status - HTTP-first architecture"""
+    """Get detailed scraper status - Universal search architecture"""
     return {
         "architecture": "HTTP-first with browser fallback",
+        "search_scope": "Universal Google search (user-controllable)",
         "http_session_ready": scraper.session is not None,
         "browser_available": scraper._browser_available,
-        "browser_fallback_enabled": scraper.enable_browser_fallback,
+        "browser_fallback_enabled": scraper.enable_browser,
         "browser_retries": scraper.browser_retry_count,
         "request_count": scraper.request_count,
         "last_request_time": scraper.last_request_time,
-        "version": "6.1.0-HTTP-FIRST",
-        "data_source": "REAL web scraping - HTTP primary",
+        "version": "6.2.0-UNIVERSAL-SEARCH",
+        "data_source": "REAL web scraping - universal search",
         "railway_optimized": True,
+        "search_control": {
+            "default": "Searches entire Google index",
+            "linkedin_only": "Use keywords: 'site:linkedin.com/in'",
+            "company_site": "Use keywords: 'site:company.com'",
+            "multiple_sites": "Use keywords: 'site:linkedin.com OR site:company.com'"
+        },
         "priority_order": [
-            "1. HTTP-based scraping (primary)",
-            "2. Professional APIs/directories", 
-            "3. Browser automation (fallback only)"
+            "1. Universal Google search via HTTP (user-controlled)",
+            "2. Company website scraping (if company specified)", 
+            "3. Professional directories",
+            "4. Browser automation (fallback only)"
         ]
     }
 
