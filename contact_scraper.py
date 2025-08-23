@@ -300,7 +300,7 @@ class RailwayContactScraper:
             logger.warning(f"⚠️ API scraping failed: {e}")
         
         # FALLBACK STRATEGY: Browser-based scraping (only if needed and available)
-        if len(all_results) < params.max_results // 2 and self.enable_browser_fallback:
+        if len(all_results) < params.max_results // 2 and self.enable_browser:
             try:
                 if not self._browser_available:
                     browser_ready = await self._init_browser_with_patience()
@@ -1658,8 +1658,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global scraper - HTTP-first with browser fallback
-scraper = RailwayContactScraper(enable_browser_fallback=True)
+# Global scraper
+scraper = RailwayContactScraper(enable_browser=True)
 
 @app.on_event("startup")
 async def startup_event():
