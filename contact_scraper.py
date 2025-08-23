@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Railway Contact Scraper - REAL WEB SCRAPING WITH TIMEOUT FIXES
-Solves browser timeout issues while maintaining genuine data extraction
+Railway Contact Scraper - Google Custom Search API Version
+Reliable, fast contact scraping using Google Custom Search API
+No more browser timeouts or HTML parsing issues!
 """
 
 import asyncio
@@ -10,28 +11,34 @@ import random
 import re
 import logging
 from typing import Dict, List, Any, Optional, Tuple, Set
-from urllib.parse import urljoin, urlparse, quote, unquote
+from urllib.parse import quote, unquote
 import json
-from dataclasses import dataclass, asdict
-from datetime import datetime
+from dataclasses import dataclass, asdict, field
+from datetime import datetime, timedelta
 import hashlib
 from difflib import SequenceMatcher
 from collections import defaultdict
 import os
 import tempfile
 import requests
-from bs4 import BeautifulSoup
-import httpx
+import sqlite3
+from pathlib import Path
 
 # API Framework
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
+import httpx
 
 # Railway environment configuration
 PORT = int(os.getenv("PORT", 8000))
 RAILWAY_ENV = os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
+
+# API Keys from environment
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID") 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Configure logging for Railway
 logging.basicConfig(
@@ -42,7 +49,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SearchParameters:
-    """Search parameters for contact scraping"""
+    """Enhanced search parameters for Google API"""
+    query: str
     industry: Optional[str] = None
     position: Optional[str] = None
     company: Optional[str] = None
@@ -52,1602 +60,941 @@ class SearchParameters:
     experience_level: Optional[str] = None
     company_size: Optional[str] = None
     max_results: int = 50
-    min_confidence: float = 0.25
+    min_confidence: float = 0.6
+    use_ai_validation: bool = True
+    enable_caching: bool = True
     
-    def to_search_string(self) -> str:
-        """Convert parameters to search string"""
+    def to_search_query(self) -> str:
+        """Convert to optimized Google search query"""
         parts = []
-        if self.position: parts.append(f'"{self.position}"')
-        if self.industry: parts.append(f'"{self.industry}"')
-        if self.company: parts.append(f'"{self.company}"')
-        if self.country: parts.append(self.country)
-        if self.city: parts.append(self.city)
-        if self.keywords: parts.append(self.keywords)
+        
+        # Core search terms
+        if self.query:
+            parts.append(f'"{self.query}"')
+        if self.position:
+            parts.append(f'"{self.position}"')
+        if self.company:
+            parts.append(f'"{self.company}"')
+        if self.industry:
+            parts.append(f'"{self.industry}"')
+            
+        # Location
+        if self.city and self.country:
+            parts.append(f'"{self.city}, {self.country}"')
+        elif self.country:
+            parts.append(f'"{self.country}"')
+        elif self.city:
+            parts.append(f'"{self.city}"')
+            
+        # Additional keywords
+        if self.keywords:
+            parts.append(self.keywords)
+        else:
+            # Default to LinkedIn profiles
+            parts.append('site:linkedin.com/in/')
+            
         return " ".join(parts)
 
-@dataclass
+@dataclass  
 class ContactResult:
-    """Contact result data structure"""
+    """Enhanced contact result with validation scores"""
     name: str
     position: Optional[str] = None
     company: Optional[str] = None
     location: Optional[str] = None
+    country: Optional[str] = None
+    industry: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    company_website: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    profile_url: Optional[str] = None
-    industry: Optional[str] = None
-    experience: Optional[str] = None
-    summary: Optional[str] = None
-    source: Optional[str] = None
-    scraped_at: Optional[str] = None
+    experience_level: Optional[str] = None
+    profile_summary: Optional[str] = None
+    search_query: Optional[str] = None
+    search_source: str = "Google Custom Search API"
     confidence_score: float = 0.0
+    ai_validation_score: Optional[float] = None
+    quality_notes: Optional[str] = None
+    scraped_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    cache_hit: bool = False
     
     def __post_init__(self):
         if not self.scraped_at:
             self.scraped_at = datetime.now().isoformat()
 
-class RailwayContactScraper:
-    """Railway-Optimized Contact Scraper with REAL web scraping"""
+class ContactCache:
+    """SQLite-based contact caching system"""
     
-    def __init__(self, enable_browser: bool = True):
-        self.enable_browser = enable_browser
-        self.browser_page = None
-        self.session = None
-        self._browser_available = False
-        
-        # Enhanced HTTP session with better bot detection evasion
-        self.http_headers = self._get_rotating_headers()
-        
-        # Rate limiting for respectful scraping
-        self.last_request_time = 0
-        self.min_delay = 3.0  # Longer delays for respectful scraping
-        self.request_count = 0
-        
-        # Browser retry settings
-        self.browser_retry_count = 0
-        self.max_browser_retries = 2
-        
-        logger.info(f"🚀 Railway scraper initialized (browser: {enable_browser})")
+    def __init__(self, cache_file: str = "contacts_cache.db"):
+        self.cache_file = cache_file
+        self.init_cache()
     
-    def _get_rotating_headers(self) -> Dict[str, str]:
-        """Get realistic, rotating headers to avoid bot detection"""
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/121.0'
-        ]
-        
-        return {
-            'User-Agent': random.choice(user_agents),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0'
-        }
-    
-    async def _init_browser_with_patience(self):
-        """Initialize browser with Railway-specific optimizations and patience"""
-        if not self.enable_browser or self._browser_available:
-            return self._browser_available
-            
+    def init_cache(self):
+        """Initialize cache database"""
         try:
-            logger.info("🌐 Initializing browser with Railway optimizations...")
+            conn = sqlite3.connect(self.cache_file)
+            cursor = conn.cursor()
             
-            # Import with timeout
-            try:
-                from DrissionPage import ChromiumPage, ChromiumOptions
-            except ImportError as e:
-                logger.warning(f"⚠️ DrissionPage not available: {e}")
-                return False
-            
-            # Create Railway-optimized browser options
-            co = ChromiumOptions()
-            
-            # Railway Chrome detection with better error handling
-            chrome_paths = [
-                '/nix/store/*/bin/chromium',
-                '/usr/bin/chromium-browser', 
-                '/usr/bin/chromium',
-                '/usr/bin/google-chrome-stable',
-                '/usr/bin/google-chrome'
-            ]
-            
-            chrome_found = False
-            for path_pattern in chrome_paths:
-                if '*' in path_pattern:
-                    import glob
-                    matches = glob.glob(path_pattern)
-                    if matches and os.path.exists(matches[0]):
-                        co.set_browser_path(matches[0])
-                        chrome_found = True
-                        logger.info(f"✅ Found Chrome: {matches[0]}")
-                        break
-                elif os.path.exists(path_pattern):
-                    co.set_browser_path(path_pattern)
-                    chrome_found = True
-                    logger.info(f"✅ Found Chrome: {path_pattern}")
-                    break
-            
-            if not chrome_found:
-                logger.info("🔍 No Chrome found, letting DrissionPage auto-detect...")
-            
-            # Railway-optimized arguments (REMOVED --disable-javascript)
-            co.set_argument('--headless=new')
-            co.set_argument('--no-sandbox')
-            co.set_argument('--disable-dev-shm-usage')
-            co.set_argument('--disable-gpu')
-            co.set_argument('--window-size=1280,720')
-            co.set_argument('--disable-web-security')
-            co.set_argument('--disable-features=VizDisplayCompositor')
-            co.set_argument('--disable-extensions')
-            co.set_argument('--disable-plugins')
-            co.set_argument('--disable-images')  # Faster loading
-            co.set_argument('--no-first-run')
-            co.set_argument('--disable-default-apps')
-            # NOTE: JavaScript is ENABLED - essential for modern websites
-            
-            # Human-like user agent
-            co.set_argument(f'--user-agent={self.http_headers["User-Agent"]}')
-            
-            # Create temp directory
-            temp_dir = tempfile.mkdtemp(prefix='chrome_railway_')
-            co.set_user_data_path(temp_dir)
-            
-            # Create browser with extended timeout
-            logger.info("🔧 Creating browser instance...")
-            
-            def create_browser():
-                return ChromiumPage(addr_or_opts=co)
-            
-            # Use asyncio.wait_for with longer timeout for Railway
-            self.browser_page = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, create_browser),
-                timeout=45.0  # Extended timeout for Railway
-            )
-            
-            # Test browser with simple page
-            logger.info("🧪 Testing browser functionality...")
-            
-            def test_browser():
-                self.browser_page.get("https://httpbin.org/user-agent")
-                return True
-            
-            await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, test_browser),
-                timeout=15.0
-            )
-            
-            self._browser_available = True
-            logger.info("✅ Browser initialized and tested successfully")
-            return True
-            
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Browser initialization timeout - this is common in Railway")
-            self._handle_browser_failure()
-            return False
-        except Exception as e:
-            logger.warning(f"⚠️ Browser initialization failed: {e}")
-            self._handle_browser_failure()
-            return False
-    
-    def _handle_browser_failure(self):
-        """Handle browser initialization failure"""
-        self.browser_retry_count += 1
-        if self.browser_page:
-            try:
-                self.browser_page.quit()
-            except:
-                pass
-            self.browser_page = None
-        self._browser_available = False
-    
-    async def _init_http_session(self):
-        """Initialize HTTP session for real web scraping"""
-        try:
-            if not self.session:
-                # Create httpx async client
-                limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
-                timeout = httpx.Timeout(30.0, connect=10.0)
-                
-                self.session = httpx.AsyncClient(
-                    headers=self.http_headers,
-                    limits=limits,
-                    timeout=timeout,
-                    follow_redirects=True
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS contacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    search_hash TEXT,
+                    name TEXT,
+                    position TEXT,
+                    company TEXT,
+                    location TEXT,
+                    country TEXT,
+                    industry TEXT,
+                    linkedin_url TEXT,
+                    company_website TEXT,
+                    email TEXT,
+                    phone TEXT,
+                    experience_level TEXT,
+                    profile_summary TEXT,
+                    search_query TEXT,
+                    confidence_score REAL,
+                    ai_validation_score REAL,
+                    quality_notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(linkedin_url, search_hash)
                 )
-                logger.info("✅ HTTP session initialized for real web scraping")
-            return True
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_search_hash ON contacts(search_hash)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_created_at ON contacts(created_at)
+            """)
+            
+            conn.commit()
+            conn.close()
+            logger.info("✅ Contact cache initialized")
+            
         except Exception as e:
-            logger.error(f"❌ HTTP session init failed: {e}")
-            return False
+            logger.error(f"❌ Cache initialization failed: {e}")
     
-    async def search_contacts(self, params: SearchParameters) -> List[ContactResult]:
-        """Main search method - HTTP-FIRST with browser fallback"""
-        logger.info(f"🔍 Starting HTTP-FIRST contact search: {params}")
-        
-        all_results = []
-        methods_attempted = []
-        
-        # PRIMARY STRATEGY: HTTP-based REAL scraping (fast and reliable)
-        try:
-            await self._init_http_session()
-            logger.info("📡 Starting PRIMARY HTTP-based scraping...")
-            
-            http_results = await self._real_http_scraping(params)
-            all_results.extend(http_results)
-            methods_attempted.append("HTTP Scraping")
-            logger.info(f"📡 PRIMARY HTTP scraping: {len(http_results)} real contacts found")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Primary HTTP scraping failed: {e}")
-        
-        # SECONDARY STRATEGY: Professional directory APIs and structured data
-        try:
-            api_results = await self._real_api_scraping(params)
-            all_results.extend(api_results)
-            methods_attempted.append("API/Structured Data")
-            logger.info(f"📊 API scraping: {len(api_results)} real contacts found")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ API scraping failed: {e}")
-        
-        # FALLBACK STRATEGY: Browser-based scraping (only if needed and available)
-        if len(all_results) < params.max_results // 2 and self.enable_browser:
-            try:
-                if not self._browser_available:
-                    browser_ready = await self._init_browser_with_patience()
-                else:
-                    browser_ready = True
-                
-                if browser_ready:
-                    logger.info("🌐 Starting FALLBACK browser-based scraping...")
-                    browser_results = await self._real_browser_scraping(params)
-                    all_results.extend(browser_results)
-                    methods_attempted.append("Browser Scraping (Fallback)")
-                    logger.info(f"🌐 FALLBACK browser scraping: {len(browser_results)} real contacts found")
-                else:
-                    logger.info("⚠️ Browser fallback unavailable - continuing with HTTP results")
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Browser fallback failed: {e}")
-        else:
-            logger.info(f"✅ Sufficient results from HTTP methods ({len(all_results)}), skipping browser fallback")
-        
-        # Deduplicate and sort by confidence
-        unique_results = self._deduplicate_real_contacts(all_results)
-        sorted_results = sorted(unique_results, key=lambda x: x.confidence_score, reverse=True)
-        final_results = sorted_results[:params.max_results]
-        
-        logger.info(f"✅ HTTP-FIRST search complete: {len(final_results)} genuine contacts from {len(methods_attempted)} methods")
-        return final_results
+    def get_search_hash(self, search_params: SearchParameters) -> str:
+        """Generate hash for search parameters"""
+        search_key = f"{search_params.query}|{search_params.position}|{search_params.company}|{search_params.industry}|{search_params.country}"
+        return hashlib.md5(search_key.lower().encode()).hexdigest()
     
-    async def _real_browser_scraping(self, params: SearchParameters) -> List[ContactResult]:
-        """REAL browser-based scraping with universal Google search"""
-        if not self._browser_available:
-            return []
-        
+    def get_cached_contacts(self, search_params: SearchParameters, max_age_days: int = 7) -> List[ContactResult]:
+        """Get cached contacts for search"""
         try:
-            results = []
+            search_hash = self.get_search_hash(search_params)
+            cutoff_date = datetime.now() - timedelta(days=max_age_days)
             
-            # Build ONE universal search query (user-controlled)
-            search_query = self._build_universal_search_query(params)
-            search_url = f"https://www.google.com/search?q={quote(search_query)}&num=15"
+            conn = sqlite3.connect(self.cache_file)
+            cursor = conn.cursor()
             
-            logger.info(f"🔍 Browser universal search: {search_query}")
+            cursor.execute("""
+                SELECT * FROM contacts 
+                WHERE search_hash = ? AND created_at > ?
+                ORDER BY confidence_score DESC, ai_validation_score DESC
+                LIMIT ?
+            """, (search_hash, cutoff_date.isoformat(), search_params.max_results))
             
-            # Apply respectful rate limiting
-            await self._respectful_delay()
+            rows = cursor.fetchall()
+            conn.close()
             
-            # Navigate with patience
-            success = await self._patient_browser_navigation(search_url)
-            if not success:
-                return []
+            contacts = []
+            for row in rows:
+                contact = ContactResult(
+                    name=row[2],
+                    position=row[3],
+                    company=row[4],
+                    location=row[5],
+                    country=row[6],
+                    industry=row[7],
+                    linkedin_url=row[8],
+                    company_website=row[9],
+                    email=row[10],
+                    phone=row[11],
+                    experience_level=row[12],
+                    profile_summary=row[13],
+                    search_query=row[14],
+                    confidence_score=row[15] or 0.0,
+                    ai_validation_score=row[16],
+                    quality_notes=row[17],
+                    scraped_at=row[18],
+                    cache_hit=True
+                )
+                contacts.append(contact)
             
-            # Extract real contacts from current page
-            page_results = await self._extract_real_contacts_from_page(params)
-            results.extend(page_results)
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"❌ Browser scraping failed: {e}")
-            return []
-    
-    async def _patient_browser_navigation(self, search_url: str) -> bool:
-        """Navigate with patience and retry logic"""
-        try:
-            def navigate():
-                self.browser_page.get(search_url)
-                return True
-            
-            # Navigate with timeout
-            await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, navigate),
-                timeout=20.0
-            )
-            
-            # Wait for page to load with patience
-            await asyncio.sleep(random.uniform(3, 5))
-            
-            # Check if page loaded successfully
-            def check_page():
-                try:
-                    title = self.browser_page.title
-                    return title and len(title) > 0
-                except:
-                    return False
-            
-            page_loaded = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, check_page),
-                timeout=10.0
-            )
-            
-            if not page_loaded:
-                logger.warning("⚠️ Page didn't load properly")
-                return False
-            
-            # Check for blocking (CAPTCHA, etc.)
-            def check_blocking():
-                try:
-                    html_sample = self.browser_page.html[:1000].lower()
-                    blocking_indicators = ['captcha', 'unusual traffic', 'blocked', 'verify you are human']
-                    return any(indicator in html_sample for indicator in blocking_indicators)
-                except:
-                    return False
-            
-            is_blocked = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, check_blocking),
-                timeout=5.0
-            )
-            
-            if is_blocked:
-                logger.warning("⚠️ Page appears to be blocked")
-                await asyncio.sleep(random.uniform(10, 15))  # Longer wait if blocked
-                return False
-            
-            return True
-            
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Browser navigation timeout")
-            return False
-        except Exception as e:
-            logger.warning(f"⚠️ Browser navigation error: {e}")
-            return False
-    
-    async def _extract_real_contacts_from_page(self, params: SearchParameters) -> List[ContactResult]:
-        """Extract REAL contact information from current page"""
-        try:
-            def extract_contacts():
-                results = []
-                
-                # Try multiple selectors for search results
-                selectors = ['.g', '.tF2Cxc', '.yuRUbf', '.rc', '.sr']
-                
-                elements = []
-                for selector in selectors:
-                    try:
-                        found_elements = self.browser_page.eles(f'css:{selector}')
-                        if found_elements:
-                            elements = found_elements
-                            break
-                    except:
-                        continue
-                
-                if not elements:
-                    return []
-                
-                for i, element in enumerate(elements[:10]):  # Limit for Railway
-                    try:
-                        contact = self._parse_real_search_result(element, params, i)
-                        if contact and contact.confidence_score >= params.min_confidence:
-                            contact.source = "Browser Search"
-                            results.append(contact)
-                    except:
-                        continue
-                
-                return results
-            
-            # Extract with timeout
-            contacts = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, extract_contacts),
-                timeout=15.0
-            )
-            
+            logger.info(f"📦 Found {len(contacts)} cached contacts for search")
             return contacts
             
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Contact extraction timeout")
-            return []
         except Exception as e:
-            logger.warning(f"⚠️ Contact extraction error: {e}")
+            logger.error(f"❌ Cache retrieval failed: {e}")
             return []
     
-    def _parse_real_search_result(self, element, params: SearchParameters, index: int) -> Optional[ContactResult]:
-        """Parse individual search result element for REAL contact data"""
+    def cache_contacts(self, contacts: List[ContactResult], search_params: SearchParameters):
+        """Cache new contacts"""
         try:
-            # Extract title, URL, and snippet with timeouts
-            title, url, snippet = "", "", ""
+            search_hash = self.get_search_hash(search_params)
             
-            try:
-                title_elem = element.ele('css:h3', timeout=1)
-                title = title_elem.text.strip() if title_elem else ""
-            except:
-                pass
+            conn = sqlite3.connect(self.cache_file)
+            cursor = conn.cursor()
             
-            try:
-                link_elem = element.ele('css:a[href]', timeout=1)
-                url = link_elem.attr('href') if link_elem else ""
-            except:
-                pass
+            for contact in contacts:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO contacts 
+                        (search_hash, name, position, company, location, country, industry,
+                         linkedin_url, company_website, email, phone, experience_level,
+                         profile_summary, search_query, confidence_score, ai_validation_score, quality_notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        search_hash,
+                        contact.name,
+                        contact.position,
+                        contact.company,
+                        contact.location,
+                        contact.country,
+                        contact.industry,
+                        contact.linkedin_url,
+                        contact.company_website,
+                        contact.email,
+                        contact.phone,
+                        contact.experience_level,
+                        contact.profile_summary,
+                        contact.search_query,
+                        contact.confidence_score,
+                        contact.ai_validation_score,
+                        contact.quality_notes
+                    ))
+                except sqlite3.IntegrityError:
+                    # Contact already exists, skip
+                    continue
             
-            try:
-                snippet_selectors = ['.VwiC3b', '.s', '.st', '.IsZvec']
-                for selector in snippet_selectors:
-                    try:
-                        snippet_elem = element.ele(f'css:{selector}', timeout=1)
-                        if snippet_elem:
-                            snippet = snippet_elem.text.strip()
-                            break
-                    except:
-                        continue
-            except:
-                pass
-            
-            # Skip if no useful content
-            if not title and not snippet:
-                return None
-            
-            # Skip job boards and generic sites
-            excluded_domains = ['indeed.com', 'glassdoor.com', 'jobsite.com', 'wikipedia.org']
-            if url and any(domain in url.lower() for domain in excluded_domains):
-                return None
-            
-            # Extract REAL contact information
-            full_text = f"{title} {snippet}"
-            contact_info = self._extract_contact_information(full_text, url, params)
-            
-            if contact_info:
-                return ContactResult(**contact_info)
-            
-            return None
+            conn.commit()
+            conn.close()
+            logger.info(f"💾 Cached {len(contacts)} new contacts")
             
         except Exception as e:
-            logger.debug(f"⚠️ Failed to parse result {index}: {e}")
-            return None
+            logger.error(f"❌ Caching failed: {e}")
     
-    async def _real_http_scraping(self, params: SearchParameters) -> List[ContactResult]:
-        """REAL HTTP-based scraping of professional websites"""
+    def cleanup_old_cache(self, max_age_days: int = 30):
+        """Clean up old cached entries"""
         try:
-            if not self.session:
-                await self._init_http_session()
+            cutoff_date = datetime.now() - timedelta(days=max_age_days)
             
-            results = []
+            conn = sqlite3.connect(self.cache_file)
+            cursor = conn.cursor()
             
-            # Strategy 1: Search for company "About Us" and "Team" pages
-            if params.company:
-                company_results = await self._scrape_company_websites(params)
-                results.extend(company_results)
+            cursor.execute("DELETE FROM contacts WHERE created_at < ?", (cutoff_date.isoformat(),))
+            deleted_count = cursor.rowcount
             
-            # Strategy 2: Search professional directories and business listings
-            directory_results = await self._scrape_business_directories(params)
-            results.extend(directory_results)
+            conn.commit()
+            conn.close()
             
-            # Strategy 3: Search for LinkedIn profiles via alternative methods
-            linkedin_results = await self._scrape_linkedin_alternatives(params)
-            results.extend(linkedin_results)
-            
-            return results
+            logger.info(f"🧹 Cleaned up {deleted_count} old cache entries")
             
         except Exception as e:
-            logger.error(f"❌ HTTP scraping failed: {e}")
+            logger.error(f"❌ Cache cleanup failed: {e}")
+
+class GoogleSearchClient:
+    """Google Custom Search API client"""
+    
+    def __init__(self, api_key: str, search_engine_id: str):
+        self.api_key = api_key
+        self.search_engine_id = search_engine_id
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+        self.session = None
+        
+    async def init_session(self):
+        """Initialize HTTP session"""
+        if not self.session:
+            timeout = httpx.Timeout(30.0, connect=10.0)
+            self.session = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+    
+    async def search(self, query: str, num_results: int = 10, start_index: int = 1) -> List[Dict]:
+        """Perform Google Custom Search API call"""
+        try:
+            await self.init_session()
+            
+            params = {
+                'key': self.api_key,
+                'cx': self.search_engine_id,
+                'q': query,
+                'num': min(num_results, 10),  # API limit is 10 per request
+                'start': start_index
+            }
+            
+            logger.info(f"🔍 Google API search: {query[:100]}...")
+            
+            response = await self.session.get(self.base_url, params=params)
+            
+            if response.status_code != 200:
+                logger.error(f"❌ Google API error {response.status_code}: {response.text}")
+                return []
+            
+            data = response.json()
+            
+            if 'error' in data:
+                logger.error(f"❌ Google API error: {data['error']}")
+                return []
+            
+            items = data.get('items', [])
+            logger.info(f"✅ Google API returned {len(items)} results")
+            
+            return items
+            
+        except Exception as e:
+            logger.error(f"❌ Google API search failed: {e}")
             return []
     
-    async def _scrape_company_websites(self, params: SearchParameters) -> List[ContactResult]:
-        """Scrape company websites using Google search"""
+    async def batch_search(self, query: str, total_results: int = 50) -> List[Dict]:
+        """Perform multiple API calls to get more results"""
+        all_items = []
+        
+        # Calculate number of requests needed
+        requests_needed = min((total_results + 9) // 10, 10)  # Max 10 requests (100 results)
+        
+        for i in range(requests_needed):
+            start_index = i * 10 + 1
+            
+            items = await self.search(query, 10, start_index)
+            
+            if not items:
+                break
+                
+            all_items.extend(items)
+            
+            # Respectful delay between requests
+            if i < requests_needed - 1:
+                await asyncio.sleep(0.5)
+        
+        return all_items[:total_results]
+    
+    async def close(self):
+        """Close HTTP session"""
+        if self.session:
+            await self.session.aclose()
+
+class OpenAIValidator:
+    """OpenAI-powered lead validation"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.session = None
+        
+    async def init_session(self):
+        """Initialize HTTP session"""
+        if not self.session:
+            timeout = httpx.Timeout(60.0, connect=10.0)
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
+            self.session = httpx.AsyncClient(timeout=timeout, headers=headers)
+    
+    async def validate_contacts(self, contacts: List[ContactResult], search_params: SearchParameters) -> List[ContactResult]:
+        """Batch validate contacts using OpenAI"""
         try:
-            results = []
+            if not contacts:
+                return []
+                
+            await self.init_session()
             
-            if not params.company:
-                return results
+            # Prepare contacts for AI validation
+            contacts_data = []
+            for i, contact in enumerate(contacts):
+                contacts_data.append({
+                    'id': i + 1,
+                    'name': contact.name or 'Unknown',
+                    'position': contact.position or 'Not specified',
+                    'company': contact.company or 'Not specified',
+                    'location': contact.location or 'Not specified',
+                    'linkedin_url': contact.linkedin_url or 'Not found',
+                    'summary': contact.profile_summary or 'No summary'
+                })
             
-            # Use universal search query to find company pages via Google
-            # Create modified params to search for company pages specifically
-            company_params = SearchParameters(
-                company=params.company,
-                keywords="team OR about OR leadership OR contact OR staff"
+            # Create validation prompt
+            prompt = f"""
+You are an expert lead qualification specialist. Analyze these {len(contacts)} LinkedIn leads and validate their quality and relevance.
+
+SEARCH CRITERIA:
+- Query: "{search_params.query}"
+- Position: {search_params.position or 'Any'}
+- Company: {search_params.company or 'Any'}
+- Industry: {search_params.industry or 'Any'}
+- Location: {search_params.country or 'Any'}
+
+LEADS TO VALIDATE:
+{json.dumps(contacts_data, indent=2)}
+
+VALIDATION CRITERIA:
+1. Profile Quality: Complete and professional profile
+2. Relevance: Matches search criteria
+3. Authenticity: Real person, not fake profile
+4. Professional Value: Appropriate for business outreach
+
+Return ONLY valid JSON array with enhanced lead data:
+[
+  {{
+    "id": 1,
+    "name": "Enhanced Professional Name",
+    "position": "Specific Job Title",
+    "company": "Company Name",
+    "location": "City, Country",
+    "linkedin_url": "Profile URL",
+    "validation_score": 8.5,
+    "quality_notes": "Brief professional assessment",
+    "industry": "Industry if determinable",
+    "experience_level": "Entry/Mid/Senior/Executive",
+    "email_likelihood": "High/Medium/Low",
+    "contact_potential": "High/Medium/Low"
+  }}
+]
+
+Return empty array [] if no leads meet professional standards (score < 7.0).
+"""
+
+            logger.info(f"🧠 AI validating {len(contacts)} contacts...")
+            
+            payload = {
+                'model': 'gpt-4',
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': 'You are an expert lead qualification specialist. Always respond with valid JSON only.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'max_tokens': 4000,
+                'temperature': 0.2
+            }
+            
+            response = await self.session.post(
+                'https://api.openai.com/v1/chat/completions',
+                json=payload
             )
             
-            search_query = self._build_universal_search_query(company_params)
-            search_url = f"https://www.google.com/search?q={quote(search_query)}&num=10"
+            if response.status_code != 200:
+                logger.error(f"❌ OpenAI API error {response.status_code}")
+                return contacts  # Return original contacts if AI fails
             
+            result = response.json()
+            
+            if not result.get('choices'):
+                logger.error("❌ Empty OpenAI response")
+                return contacts
+            
+            ai_response = result['choices'][0]['message']['content'].strip()
+            
+            # Parse AI response
             try:
-                await self._respectful_delay()
+                # Clean response
+                clean_response = ai_response.replace('```json\n', '').replace('\n```', '').strip()
+                validated_data = json.loads(clean_response)
                 
-                response = await self.session.get(search_url)
-                if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, 'html.parser')
+                if not isinstance(validated_data, list):
+                    logger.error("❌ AI response not a list")
+                    return contacts
+                
+                # Update original contacts with AI validation
+                validated_contacts = []
+                
+                for ai_contact in validated_data:
+                    original_idx = ai_contact.get('id', 1) - 1
                     
-                    # Extract company website URLs
-                    company_urls = self._extract_company_urls(soup, params.company)
-                    
-                    # Scrape the actual company websites
-                    for url in company_urls[:3]:  # Limit URLs
-                        try:
-                            contacts = await self._scrape_company_page(url, params)
-                            results.extend(contacts)
-                        except:
-                            continue
+                    if 0 <= original_idx < len(contacts):
+                        contact = contacts[original_idx]
                         
-            except Exception as e:
-                logger.debug(f"Google company search failed: {e}")
-            
-            return results
-            
-        except Exception as e:
-            logger.debug(f"Company website scraping error: {e}")
-            return []
-    
-    async def _scrape_company_page(self, url: str, params: SearchParameters) -> List[ContactResult]:
-        """Scrape individual company page for contacts"""
-        try:
-            results = []
-            
-            await self._respectful_delay()
-            
-            response = await self.session.get(url)
-            if response.status_code == 200:
-                html = response.text  # httpx decodes automatically  
-                soup = BeautifulSoup(html, 'html.parser')
+                        # Update with AI enhancements
+                        contact.ai_validation_score = ai_contact.get('validation_score', contact.confidence_score)
+                        contact.quality_notes = ai_contact.get('quality_notes', '')
+                        contact.industry = ai_contact.get('industry') or contact.industry
+                        contact.experience_level = ai_contact.get('experience_level') or contact.experience_level
+                        
+                        # Enhanced position and company from AI
+                        if ai_contact.get('position') and ai_contact['position'] != 'Not specified':
+                            contact.position = ai_contact['position']
+                        if ai_contact.get('company') and ai_contact['company'] != 'Not specified':
+                            contact.company = ai_contact['company']
+                        
+                        # Update overall confidence score
+                        contact.confidence_score = max(contact.confidence_score, contact.ai_validation_score or 0)
+                        
+                        validated_contacts.append(contact)
                 
-                # Look for team/about sections
-                team_sections = soup.find_all(['div', 'section'], 
-                    class_=re.compile(r'(team|about|staff|leadership|management)', re.I))
+                logger.info(f"✅ AI validated {len(validated_contacts)} high-quality contacts from {len(contacts)} total")
+                return validated_contacts
                 
-                for section in team_sections[:3]:  # Limit sections
-                    contacts = self._extract_contacts_from_section(section, url, params)
-                    results.extend(contacts)
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Failed to parse AI response: {e}")
+                return contacts
+                
+        except Exception as e:
+            logger.error(f"❌ AI validation failed: {e}")
+            return contacts  # Return original contacts if AI fails
+    
+    async def close(self):
+        """Close HTTP session"""
+        if self.session:
+            await self.session.aclose()
+
+class RailwayContactScraperAPI:
+    """Railway-optimized contact scraper using Google Custom Search API"""
+    
+    def __init__(self):
+        self.google_client = None
+        self.openai_validator = None
+        self.cache = ContactCache()
+        self.request_count = 0
+        self.last_request_time = 0
+        
+        # Initialize API clients if keys available
+        if GOOGLE_API_KEY and SEARCH_ENGINE_ID:
+            self.google_client = GoogleSearchClient(GOOGLE_API_KEY, SEARCH_ENGINE_ID)
+            logger.info("✅ Google Custom Search API initialized")
+        else:
+            logger.warning("⚠️ Google API credentials not found")
             
-            return results[:5]  # Limit results per page
+        if OPENAI_API_KEY:
+            self.openai_validator = OpenAIValidator(OPENAI_API_KEY)
+            logger.info("✅ OpenAI API initialized")
+        else:
+            logger.warning("⚠️ OpenAI API key not found - validation disabled")
+    
+    async def search_contacts(self, params: SearchParameters) -> List[ContactResult]:
+        """Main contact search method"""
+        logger.info(f"🔍 Starting contact search: {params.query}")
+        
+        # Check API availability
+        if not self.google_client:
+            raise Exception("Google Custom Search API not configured. Set GOOGLE_API_KEY and SEARCH_ENGINE_ID environment variables.")
+        
+        # Step 1: Check cache first
+        cached_contacts = []
+        if params.enable_caching:
+            cached_contacts = self.cache.get_cached_contacts(params)
+            
+            if len(cached_contacts) >= params.max_results:
+                logger.info(f"💨 Using {len(cached_contacts)} cached contacts - instant results!")
+                return cached_contacts[:params.max_results]
+        
+        # Step 2: Search via Google API
+        search_query = params.to_search_query()
+        needed_results = params.max_results - len(cached_contacts)
+        
+        logger.info(f"🚀 Searching Google API for {needed_results} additional contacts...")
+        search_results = await self.google_client.batch_search(search_query, needed_results * 2)
+        
+        # Step 3: Parse search results into contacts
+        raw_contacts = []
+        for item in search_results:
+            contact = self._parse_search_result(item, params)
+            if contact:
+                raw_contacts.append(contact)
+        
+        # Step 4: Filter and deduplicate
+        unique_contacts = self._deduplicate_contacts(raw_contacts, cached_contacts)
+        
+        # Step 5: AI validation (if enabled and API available)
+        validated_contacts = unique_contacts
+        if params.use_ai_validation and self.openai_validator and unique_contacts:
+            validated_contacts = await self.openai_validator.validate_contacts(unique_contacts, params)
+        
+        # Step 6: Filter by confidence and sort
+        final_contacts = [
+            contact for contact in validated_contacts
+            if contact.confidence_score >= params.min_confidence
+        ]
+        final_contacts.sort(key=lambda x: x.confidence_score, reverse=True)
+        
+        # Step 7: Cache new contacts
+        if params.enable_caching and final_contacts:
+            new_contacts = [c for c in final_contacts if not c.cache_hit]
+            if new_contacts:
+                self.cache.cache_contacts(new_contacts, params)
+        
+        # Step 8: Combine with cached results
+        all_results = cached_contacts + final_contacts[:needed_results]
+        final_results = all_results[:params.max_results]
+        
+        logger.info(f"✅ Search complete: {len(final_results)} contacts ({len(cached_contacts)} cached + {len(final_contacts)} new)")
+        
+        return final_results
+    
+    def _parse_search_result(self, item: Dict, params: SearchParameters) -> Optional[ContactResult]:
+        """Parse Google search result into ContactResult"""
+        try:
+            title = item.get('title', '')
+            link = item.get('link', '')
+            snippet = item.get('snippet', '')
+            
+            # Skip non-LinkedIn results unless specifically requested
+            if 'linkedin.com/in/' not in link and not params.keywords:
+                return None
+            
+            # Extract name from LinkedIn URL or title
+            name = self._extract_name_from_linkedin(link) or self._extract_name_from_title(title)
+            if not name:
+                return None
+            
+            # Extract other information
+            position = self._extract_position(title, snippet, params.position)
+            company = self._extract_company(title, snippet, params.company)
+            location = self._extract_location(snippet, params.country, params.city)
+            
+            # Calculate base confidence
+            confidence = self._calculate_confidence(name, position, company, location, params)
+            
+            if confidence < 0.3:  # Minimum threshold
+                return None
+            
+            contact = ContactResult(
+                name=name,
+                position=position,
+                company=company,
+                location=location,
+                country=self._extract_country(location, params.country),
+                industry=params.industry,
+                linkedin_url=link if 'linkedin.com' in link else None,
+                profile_summary=snippet[:200] if snippet else None,
+                search_query=params.query,
+                confidence_score=confidence,
+                experience_level=self._infer_experience_level(position, snippet)
+            )
+            
+            return contact
             
         except Exception as e:
-            logger.debug(f"Company page scraping error: {e}")
-            return []
+            logger.debug(f"⚠️ Failed to parse search result: {e}")
+            return None
     
-    def _extract_company_urls(self, soup: BeautifulSoup, company_name: str) -> List[str]:
-        """Extract company website URLs from search results"""
-        urls = []
+    def _extract_name_from_linkedin(self, url: str) -> Optional[str]:
+        """Extract name from LinkedIn URL"""
         try:
-            # Find search result links
-            links = soup.find_all('a', href=True)
+            if not url or 'linkedin.com/in/' not in url:
+                return None
             
-            for link in links:
-                href = link.get('href', '')
-                if href.startswith('http') and company_name.lower() in href.lower():
-                    # Filter for likely company domains
-                    if not any(excluded in href.lower() for excluded in 
-                             ['linkedin.com', 'facebook.com', 'twitter.com', 'indeed.com']):
-                        urls.append(href)
-                        if len(urls) >= 5:  # Limit URLs
-                            break
+            # Extract profile slug
+            match = re.search(r'/in/([^/?]+)', url)
+            if not match:
+                return None
+                
+            slug = match.group(1)
             
-            return urls
+            # Convert slug to readable name
+            name_parts = slug.replace('-', ' ').split()
             
-        except Exception as e:
-            logger.debug(f"URL extraction error: {e}")
-            return []
+            if len(name_parts) >= 2:
+                # Capitalize first two parts
+                first_name = name_parts[0].capitalize()
+                last_name = name_parts[1].capitalize()
+                return f"{first_name} {last_name}"
+            
+            return None
+            
+        except Exception:
+            return None
     
-    def _extract_contacts_from_section(self, section, page_url: str, params: SearchParameters) -> List[ContactResult]:
-        """Extract contact information from HTML section"""
+    def _extract_name_from_title(self, title: str) -> Optional[str]:
+        """Extract name from search result title"""
         try:
-            results = []
-            text_content = section.get_text()
+            if not title:
+                return None
             
-            # Look for name patterns
-            name_patterns = [
-                r'([A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})',  # First Last
-                r'([A-Z][a-z]{2,}\s+[A-Z]\.\s+[A-Z][a-z]{2,})',  # First M. Last
+            # Common patterns for LinkedIn titles
+            patterns = [
+                r'^([A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})',  # First Last at start
+                r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s*[-|–]',  # Name before dash
+                r'([A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+)',  # First M. Last
             ]
             
-            for pattern in name_patterns:
-                names = re.findall(pattern, text_content)
-                
-                for name in names[:3]:  # Limit names per section
-                    if self._is_likely_person_name(name):
-                        # Try to find associated position and email
-                        contact_data = self._build_contact_from_text(
-                            name, text_content, page_url, params
-                        )
-                        
-                        if contact_data:
-                            results.append(ContactResult(**contact_data))
-            
-            return results
-            
-        except Exception as e:
-            logger.debug(f"Section extraction error: {e}")
-            return []
-    
-    def _build_contact_from_text(self, name: str, context_text: str, source_url: str, params: SearchParameters) -> Optional[Dict]:
-        """Build contact data structure from extracted information"""
-        try:
-            # Extract additional information around the name
-            name_context = self._get_text_around_name(name, context_text, window=100)
-            
-            # Extract position
-            position = self._extract_position_near_name(name, name_context, params.position)
-            
-            # Extract email
-            email = self._extract_email_near_name(name, context_text)
-            
-            # Extract company (use provided or try to extract)
-            company = params.company or self._extract_company_from_context(name_context)
-            
-            # Calculate confidence based on available data
-            confidence = self._calculate_real_confidence(name, position, company, email, params)
-            
-            if confidence >= params.min_confidence:
-                return {
-                    'name': name,
-                    'position': position,
-                    'company': company,
-                    'location': self._extract_location_from_context(name_context, params),
-                    'email': email,
-                    'profile_url': source_url,
-                    'confidence_score': confidence,
-                    'summary': name_context[:200] if name_context else None,
-                    'industry': params.industry
-                }
+            for pattern in patterns:
+                match = re.search(pattern, title)
+                if match:
+                    name = match.group(1).strip()
+                    if self._is_valid_name(name):
+                        return name
             
             return None
             
-        except Exception as e:
-            logger.debug(f"Contact building error: {e}")
+        except Exception:
             return None
     
-    def _is_likely_person_name(self, name: str) -> bool:
-        """Check if extracted text is likely a person's name"""
-        if not name or len(name) < 5:
-            return False
+    def _extract_position(self, title: str, snippet: str, target_position: Optional[str] = None) -> Optional[str]:
+        """Extract job position"""
+        text = f"{title} {snippet}"
         
-        # Common false positives
-        false_positives = [
-            'privacy policy', 'terms of service', 'about us', 'contact us',
-            'our team', 'our company', 'learn more', 'find out', 'read more',
-            'new york', 'san francisco', 'los angeles', 'united states'
+        # Check for target position first
+        if target_position and target_position.lower() in text.lower():
+            return target_position
+        
+        # Look for position patterns
+        position_patterns = [
+            r'(?:^|\s)([A-Z][a-zA-Z\s]{3,30})\s*(?:at|@|\|)',
+            r'(?:CEO|CTO|CFO|VP|Director|Manager|Senior|Principal|Lead)\s+[A-Za-z\s]+',
+            r'[A-Z][a-z]+\s+(?:Engineer|Developer|Manager|Director|Analyst|Consultant|Specialist)'
         ]
         
-        name_lower = name.lower()
-        if any(fp in name_lower for fp in false_positives):
+        for pattern in position_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                position = match.strip() if isinstance(match, str) else matches[0].strip()
+                if len(position) > 3 and position.lower() not in ['linkedin', 'profile']:
+                    return position
+        
+        return None
+    
+    def _extract_company(self, title: str, snippet: str, target_company: Optional[str] = None) -> Optional[str]:
+        """Extract company name"""
+        text = f"{title} {snippet}"
+        
+        # Check for target company first
+        if target_company and target_company.lower() in text.lower():
+            return target_company
+        
+        # Look for company patterns
+        company_patterns = [
+            r'\bat\s+([A-Z][A-Za-z\s&.]+(?:Inc|LLC|Corp|Ltd|Co)\.?)',
+            r'([A-Z][A-Za-z\s&.]+(?:Inc|LLC|Corp|Ltd|Co)\.?)',
+            r'\bat\s+([A-Z][A-Za-z\s&.]{3,25})',
+        ]
+        
+        for pattern in company_patterns:
+            matches = re.findall(pattern, text)
+            for match in matches:
+                company = match.strip()
+                if len(company) > 2 and company.lower() not in ['linkedin', 'profile', 'company']:
+                    return company
+        
+        return None
+    
+    def _extract_location(self, snippet: str, target_country: Optional[str] = None, target_city: Optional[str] = None) -> Optional[str]:
+        """Extract location information"""
+        if not snippet:
+            return None
+        
+        # Check for target location first
+        if target_city and target_country:
+            pattern = rf'\b{re.escape(target_city)}[,\s]*{re.escape(target_country)}\b'
+            if re.search(pattern, snippet, re.IGNORECASE):
+                return f"{target_city}, {target_country}"
+        
+        # Look for location patterns
+        location_patterns = [
+            r'\b([A-Z][a-z]+),\s*([A-Z]{2,})\b',
+            r'(?:based|located|from)\s+in\s+([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)?)',
+            r'\b([A-Z][a-z]+\s+[A-Z][a-z]+),\s*([A-Z]{2,3})\b'
+        ]
+        
+        for pattern in location_patterns:
+            matches = re.findall(pattern, snippet)
+            if matches:
+                if isinstance(matches[0], tuple):
+                    return ', '.join(matches[0])
+                return matches[0]
+        
+        return target_country or target_city
+    
+    def _extract_country(self, location: Optional[str], target_country: Optional[str] = None) -> Optional[str]:
+        """Extract country from location"""
+        if target_country:
+            return target_country
+        
+        if location and ',' in location:
+            parts = location.split(',')
+            if len(parts) >= 2:
+                return parts[-1].strip()
+        
+        return location
+    
+    def _infer_experience_level(self, position: Optional[str], snippet: str) -> Optional[str]:
+        """Infer experience level from position and context"""
+        if not position:
+            return None
+        
+        position_lower = position.lower()
+        
+        if any(term in position_lower for term in ['ceo', 'cto', 'cfo', 'president', 'founder']):
+            return 'Executive'
+        elif any(term in position_lower for term in ['director', 'vp', 'vice president', 'head of']):
+            return 'Director'
+        elif any(term in position_lower for term in ['senior', 'lead', 'principal', 'staff']):
+            return 'Senior'
+        elif any(term in position_lower for term in ['manager', 'supervisor']):
+            return 'Manager'
+        elif any(term in position_lower for term in ['junior', 'entry', 'associate', 'trainee']):
+            return 'Entry'
+        else:
+            return 'Mid'
+    
+    def _is_valid_name(self, name: str) -> bool:
+        """Validate if extracted text is likely a person's name"""
+        if not name or len(name) < 3:
             return False
         
-        # Check for reasonable name structure
+        # Check for obvious non-names
+        invalid_terms = [
+            'linkedin', 'profile', 'company', 'about', 'contact',
+            'privacy', 'terms', 'policy', 'help', 'support'
+        ]
+        
+        if any(term in name.lower() for term in invalid_terms):
+            return False
+        
+        # Should have at least first and last name
         parts = name.split()
         if len(parts) < 2:
             return False
         
-        # Each part should look like a name component
+        # Each part should look like a name
         for part in parts:
             if not re.match(r'^[A-Z][a-z]{1,15}$', part):
                 return False
         
         return True
     
-    async def _scrape_business_directories(self, params: SearchParameters) -> List[ContactResult]:
-        """Scrape business directories for real contact information"""
-        try:
-            results = []
-            
-            # Professional business directories (examples)
-            directory_sources = [
-                "crunchbase.com",
-                "bloomberg.com/profile",
-                "reuters.com/markets/companies"
-            ]
-            
-            # Build search queries for directories
-            search_terms = []
-            if params.company:
-                search_terms.append(f"{params.company} executives")
-            if params.industry and params.position:
-                search_terms.append(f"{params.position} {params.industry} {params.country or ''}")
-            
-            for search_term in search_terms[:2]:  # Limit searches
-                try:
-                    # Use alternative search engines
-                    search_url = f"https://www.bing.com/search?q={quote(search_term + ' site:crunchbase.com OR site:bloomberg.com')}"
-                    
-                    await self._respectful_delay()
-                    
-                    async with self.session.get(search_url) as response:
-                        if response.status == 200:
-                            html = await response.text()
-                            soup = BeautifulSoup(html, 'html.parser')
-                            
-                            # Extract and follow directory links
-                            directory_links = self._extract_directory_links(soup)
-                            
-                            for link in directory_links[:2]:  # Limit links
-                                try:
-                                    contacts = await self._scrape_directory_page(link, params)
-                                    results.extend(contacts)
-                                except:
-                                    continue
-                        
-                except Exception as e:
-                    logger.debug(f"Directory search failed: {e}")
-                    continue
-            
-            return results
-            
-        except Exception as e:
-            logger.debug(f"Business directory scraping error: {e}")
-            return []
-    
-    async def _scrape_linkedin_alternatives(self, params: SearchParameters) -> List[ContactResult]:
-        """Find LinkedIn profiles through alternative methods"""
-        try:
-            results = []
-            
-            # Use alternative search to find LinkedIn profiles
-            linkedin_search = f"{params.position or ''} {params.company or ''} {params.industry or ''} site:linkedin.com/in"
-            
-            # Use DuckDuckGo to avoid Google bot detection
-            search_url = f"https://duckduckgo.com/html/?q={quote(linkedin_search)}"
-            
-            await self._respectful_delay()
-            
-            response = await self.session.get(search_url)
-            if response.status_code == 200:
-                html = response.text  # httpx decodes automatically
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # Extract LinkedIn profile URLs
-                linkedin_urls = self._extract_linkedin_urls(soup)
-                
-                # Process LinkedIn URLs to extract basic information
-                for url in linkedin_urls[:5]:  # Limit URLs
-                    contact = self._create_contact_from_linkedin_url(url, params)
-                    if contact:
-                        results.append(contact)
-            
-            return results
-            
-        except Exception as e:
-            logger.debug(f"LinkedIn alternative scraping error: {e}")
-            return []
-    
-    def _extract_linkedin_urls(self, soup: BeautifulSoup) -> List[str]:
-        """Extract LinkedIn profile URLs from search results"""
-        urls = []
-        try:
-            links = soup.find_all('a', href=True)
-            
-            for link in links:
-                href = link.get('href', '')
-                if 'linkedin.com/in/' in href and href not in urls:
-                    urls.append(href)
-                    if len(urls) >= 10:
-                        break
-            
-            return urls
-            
-        except:
-            return []
-    
-    def _create_contact_from_linkedin_url(self, linkedin_url: str, params: SearchParameters) -> Optional[ContactResult]:
-        """Create contact from LinkedIn URL (extract name from URL pattern)"""
-        try:
-            # Extract profile name from LinkedIn URL
-            import re
-            match = re.search(r'/in/([^/?]+)', linkedin_url)
-            if not match:
-                return None
-            
-            profile_slug = match.group(1)
-            
-            # Convert LinkedIn slug to readable name
-            name_parts = profile_slug.replace('-', ' ').split()
-            if len(name_parts) >= 2:
-                name = ' '.join(part.capitalize() for part in name_parts[:2])
-                
-                # Estimate confidence based on parameter matching
-                confidence = 0.4  # Base confidence for LinkedIn profiles
-                
-                if params.position:
-                    confidence += 0.1
-                if params.company:
-                    confidence += 0.1
-                
-                if confidence >= params.min_confidence:
-                    return ContactResult(
-                        name=name,
-                        position=params.position,  # Use search parameter as estimate
-                        company=params.company,    # Use search parameter as estimate
-                        linkedin_url=linkedin_url,
-                        location=f"{params.city}, {params.country}" if params.city and params.country else params.country,
-                        confidence_score=confidence,
-                        source="LinkedIn Profile",
-                        industry=params.industry
-                    )
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"LinkedIn contact creation error: {e}")
-            return None
-    
-    async def _real_api_scraping(self, params: SearchParameters) -> List[ContactResult]:
-        """Use professional APIs and structured data sources"""
-        try:
-            results = []
-            
-            # This would integrate with professional APIs like:
-            # - Hunter.io for email finding
-            # - Clearbit for company data
-            # - Apollo.io for professional contacts
-            # - ZoomInfo API
-            
-            # For now, implement basic structured data extraction
-            # that doesn't rely on paid APIs
-            
-            return results
-            
-        except Exception as e:
-            logger.debug(f"API scraping error: {e}")
-            return []
-    
-    def _build_universal_search_query(self, params: SearchParameters) -> str:
-        """Build a robust, universal search query for Google - USER CONTROLLED"""
-        query_parts = []
-
-        # Add core search terms
-        if params.position: 
-            query_parts.append(f'"{params.position}"')
-        if params.company: 
-            query_parts.append(f'"{params.company}"')
-        if params.industry: 
-            query_parts.append(f'"{params.industry}"')
-
-        # Add location
-        if params.city and params.country:
-            query_parts.append(f'"{params.city}, {params.country}"')
-        elif params.country:
-            query_parts.append(f'"{params.country}"')
-        elif params.city:
-            query_parts.append(f'"{params.city}"')
-
-        # IMPORTANT: Add user-defined keywords (can include "site:" operators)
-        if params.keywords:
-            query_parts.append(params.keywords)
-
-        # Add terms to find people/contact info (unless user specified site: operator)
-        if not params.keywords or 'site:' not in params.keywords:
-            query_parts.append('(contact OR email OR "about us" OR team OR leadership)')
-
-        # Exclude job boards (unless searching specific site)
-        if not params.keywords or 'site:' not in params.keywords:
-            query_parts.append('-jobs -careers -indeed -glassdoor')
-
-        return " ".join(query_parts)
-    
-    def _extract_contact_information(self, text: str, url: str, params: SearchParameters) -> Optional[Dict]:
-        """Extract real contact information from text"""
-        try:
-            # Extract name
-            name = self._extract_real_name(text)
-            if not name:
-                return None
-            
-            # Extract other information
-            position = self._extract_real_position(text, params.position)
-            company = self._extract_real_company(text, params.company)
-            email = self._extract_real_email(text)
-            location = self._extract_real_location(text, params.country, params.city)
-            
-            # Calculate confidence
-            confidence = self._calculate_real_confidence(name, position, company, email, params)
-            
-            if confidence >= params.min_confidence:
-                return {
-                    'name': name,
-                    'position': position,
-                    'company': company,
-                    'location': location,
-                    'email': email,
-                    'profile_url': url,
-                    'confidence_score': confidence,
-                    'summary': text[:200],
-                    'industry': params.industry
-                }
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"Contact extraction error: {e}")
-            return None
-    
-    def _extract_real_name(self, text: str) -> Optional[str]:
-        """Extract real person names from text"""
-        patterns = [
-            r'([A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})',
-            r'([A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+)',
-            r'CEO\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
-            r'([A-Z][a-z]+\s+[A-Z][a-z]+),?\s+(?:CEO|CTO|CFO|VP|Director|Manager)'
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
-                if self._is_likely_person_name(match):
-                    return match.strip()
-        
-        return None
-    
-    def _extract_real_position(self, text: str, target_position: Optional[str] = None) -> Optional[str]:
-        """Extract real job positions from text"""
-        if target_position and target_position.lower() in text.lower():
-            return target_position
-        
-        position_patterns = [
-            r'\b(Chief Executive Officer|CEO)\b',
-            r'\b(Chief Technology Officer|CTO)\b',
-            r'\b(Chief Financial Officer|CFO)\b',
-            r'\b(Vice President|VP)\s+of\s+\w+',
-            r'\b(General Manager|GM)\b',
-            r'\b(Director)\s+of\s+\w+',
-            r'\b(Senior [A-Z][a-z]+ [A-Z][a-z]+)\b'
-        ]
-        
-        for pattern in position_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            if matches:
-                return matches[0]
-        
-        return None
-    
-    def _extract_real_company(self, text: str, target_company: Optional[str] = None) -> Optional[str]:
-        """Extract real company names from text"""
-        if target_company and target_company.lower() in text.lower():
-            return target_company
-        
-        company_patterns = [
-            r'\bat\s+([A-Z][a-zA-Z\s&]+(?:Inc|LLC|Corp|Ltd|Co)\.?)\b',
-            r'\bworks?\s+(?:for|at)\s+([A-Z][a-zA-Z\s&]{3,25})\b',
-            r'\bcompany:\s*([A-Z][a-zA-Z\s&]+)\b'
-        ]
-        
-        for pattern in company_patterns:
-            matches = re.findall(pattern, text)
-            if matches:
-                company = matches[0].strip()
-                if len(company) > 2:
-                    return company
-        
-        return None
-    
-    def _extract_real_email(self, text: str) -> Optional[str]:
-        """Extract real email addresses from text"""
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        matches = re.findall(email_pattern, text)
-        
-        # Filter out common non-personal emails
-        for email in matches:
-            if not any(generic in email.lower() for generic in 
-                      ['noreply', 'info@', 'contact@', 'support@', 'admin@', 'webmaster@']):
-                return email
-        
-        return matches[0] if matches else None
-    
-    def _extract_real_location(self, text: str, target_country: Optional[str] = None, 
-                              target_city: Optional[str] = None) -> Optional[str]:
-        """Extract real location information from text"""
-        if target_city and target_country:
-            pattern = rf'\b{re.escape(target_city)}[,\s]*{re.escape(target_country)}\b'
-            if re.search(pattern, text, re.IGNORECASE):
-                return f"{target_city}, {target_country}"
-        
-        location_patterns = [
-            r'\b([A-Z][a-z]+),\s*([A-Z]{2,})\b',
-            r'(?:based|located)\s+in\s+([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)?)\b'
-        ]
-        
-        for pattern in location_patterns:
-            matches = re.findall(pattern, text)
-            if matches:
-                if isinstance(matches[0], tuple):
-                    return ', '.join(matches[0])
-                return matches[0]
-        
-        return None
-    
-    def _calculate_real_confidence(self, name: Optional[str], position: Optional[str], 
-                                  company: Optional[str], email: Optional[str], 
-                                  params: SearchParameters) -> float:
-        """Calculate confidence score for real extracted data"""
+    def _calculate_confidence(self, name: Optional[str], position: Optional[str], 
+                            company: Optional[str], location: Optional[str], 
+                            params: SearchParameters) -> float:
+        """Calculate confidence score"""
         score = 0.0
         
-        # Base score for having a valid name
-        if name and self._is_likely_person_name(name):
-            score += 0.3
+        # Base score for having a name
+        if name and self._is_valid_name(name):
+            score += 0.4
         
-        # Email significantly boosts confidence
-        if email:
-            score += 0.3
-            # Professional email (not generic)
-            if not any(generic in email.lower() for generic in ['gmail', 'yahoo', 'hotmail']):
+        # Position matching
+        if position:
+            score += 0.2
+            if params.position and params.position.lower() in position.lower():
                 score += 0.1
         
-        # Position match
-        if position and params.position:
-            if params.position.lower() in position.lower():
-                score += 0.2
-            else:
+        # Company matching  
+        if company:
+            score += 0.15
+            if params.company and params.company.lower() in company.lower():
                 score += 0.1
-        elif position:
-            score += 0.1
         
-        # Company match
-        if company and params.company:
-            if params.company.lower() in company.lower():
-                score += 0.15
-            else:
-                score += 0.08
-        elif company:
-            score += 0.08
-        
-        # Data completeness bonus
-        data_points = sum(1 for x in [name, position, company, email] if x)
-        if data_points >= 4:
+        # Location matching
+        if location:
             score += 0.1
-        elif data_points >= 3:
-            score += 0.05
+            if params.country and params.country.lower() in location.lower():
+                score += 0.05
+        
+        # Data completeness
+        data_fields = [name, position, company, location]
+        completeness = sum(1 for field in data_fields if field) / len(data_fields)
+        score += completeness * 0.1
         
         return min(score, 1.0)
     
-    def _deduplicate_real_contacts(self, contacts: List[ContactResult]) -> List[ContactResult]:
-        """Advanced deduplication with fuzzy matching and data merging"""
-        try:
-            if not contacts:
-                return []
-            
-            logger.info(f"🔄 Starting advanced deduplication for {len(contacts)} contacts...")
-            
-            # Step 1: Group potentially duplicate contacts
-            duplicate_groups = self._group_duplicates(contacts)
-            
-            # Step 2: Merge duplicates within each group
-            deduplicated_contacts = []
-            for group in duplicate_groups:
-                if len(group) == 1:
-                    deduplicated_contacts.append(group[0])
-                else:
-                    # Merge multiple contacts into one
-                    merged_contact = self._merge_contacts(group)
-                    deduplicated_contacts.append(merged_contact)
-            
-            # Step 3: Final validation and cleanup
-            final_contacts = self._final_dedup_validation(deduplicated_contacts)
-            
-            removed_count = len(contacts) - len(final_contacts)
-            logger.info(f"✅ Advanced deduplication complete: {removed_count} duplicates removed, {len(final_contacts)} unique contacts")
-            
-            return final_contacts
-            
-        except Exception as e:
-            logger.error(f"❌ Advanced deduplication failed: {e}")
-            # Fallback to basic deduplication
-            return self._basic_deduplicate(contacts)
-    
-    def _group_duplicates(self, results: List[ContactResult]) -> List[List[ContactResult]]:
-        """Group contacts that are likely duplicates using fuzzy matching"""
-        try:
-            groups = []
-            processed = set()
-            
-            for i, contact in enumerate(results):
-                if i in processed:
-                    continue
-                
-                # Start a new group with this contact
-                current_group = [contact]
-                processed.add(i)
-                
-                # Find all other contacts that match this one
-                for j, other_contact in enumerate(results[i+1:], i+1):
-                    if j in processed:
-                        continue
-                    
-                    if self._are_duplicates(contact, other_contact):
-                        current_group.append(other_contact)
-                        processed.add(j)
-                
-                groups.append(current_group)
-            
-            return groups
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Grouping duplicates failed: {e}")
-            return [[contact] for contact in results]
-    
-    def _are_duplicates(self, contact1: ContactResult, contact2: ContactResult) -> bool:
-        """Determine if two contacts are duplicates using multiple criteria"""
-        try:
-            # Exact email match (highest priority)
-            if contact1.email and contact2.email:
-                if contact1.email.lower() == contact2.email.lower():
-                    return True
-            
-            # Exact LinkedIn URL match
-            if contact1.linkedin_url and contact2.linkedin_url:
-                if self._normalize_linkedin_url(contact1.linkedin_url) == self._normalize_linkedin_url(contact2.linkedin_url):
-                    return True
-            
-            # Name + Company similarity (fuzzy matching)
-            name_similarity = self._calculate_name_similarity(contact1.name, contact2.name)
-            company_similarity = self._calculate_company_similarity(contact1.company, contact2.company)
-            
-            # High name similarity + same/similar company = duplicate
-            if name_similarity >= 0.85 and company_similarity >= 0.8:
-                return True
-            
-            # Very high name similarity alone
-            if name_similarity >= 0.95:
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Duplicate check failed: {e}")
-            return False
-    
-    def _calculate_name_similarity(self, name1: Optional[str], name2: Optional[str]) -> float:
-        """Calculate similarity between two names using fuzzy matching"""
-        try:
-            if not name1 or not name2:
-                return 0.0
-            
-            # Normalize names
-            name1_clean = self._normalize_name(name1)
-            name2_clean = self._normalize_name(name2)
-            
-            if not name1_clean or not name2_clean:
-                return 0.0
-            
-            # Exact match
-            if name1_clean == name2_clean:
-                return 1.0
-            
-            # Check if names contain each other
-            if name1_clean in name2_clean or name2_clean in name1_clean:
-                return 0.9
-            
-            # Fuzzy string similarity
-            return SequenceMatcher(None, name1_clean, name2_clean).ratio()
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Name similarity calculation failed: {e}")
-            return 0.0
-    
-    def _calculate_company_similarity(self, company1: Optional[str], company2: Optional[str]) -> float:
-        """Calculate similarity between two companies using fuzzy matching"""
-        try:
-            if not company1 or not company2:
-                return 0.0
-            
-            # Normalize company names
-            comp1_clean = self._normalize_company_name(company1)
-            comp2_clean = self._normalize_company_name(company2)
-            
-            if not comp1_clean or not comp2_clean:
-                return 0.0
-            
-            # Exact match
-            if comp1_clean == comp2_clean:
-                return 1.0
-            
-            # Check if one is contained in the other
-            if comp1_clean in comp2_clean or comp2_clean in comp1_clean:
-                return 0.9
-            
-            # Fuzzy string similarity
-            return SequenceMatcher(None, comp1_clean, comp2_clean).ratio()
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Company similarity calculation failed: {e}")
-            return 0.0
-    
-    def _merge_contacts(self, contacts: List[ContactResult]) -> ContactResult:
-        """Merge multiple contact records into a single, comprehensive record"""
-        try:
-            if len(contacts) == 1:
-                return contacts[0]
-            
-            # Choose the contact with highest confidence as base
-            base_contact = max(contacts, key=lambda c: c.confidence_score)
-            
-            # Merge information from other contacts
-            merged_data = asdict(base_contact)
-            
-            for contact in contacts:
-                contact_data = asdict(contact)
-                
-                # Fill in missing information from other contacts
-                for field, value in contact_data.items():
-                    if value and not merged_data.get(field):
-                        merged_data[field] = value
-                
-                # Choose the best email (professional > generic)
-                if contact.email and contact.email != merged_data.get('email'):
-                    current_email = merged_data.get('email', '')
-                    if self._is_better_email(contact.email, current_email):
-                        merged_data['email'] = contact.email
-                
-                # Choose the most complete position
-                if contact.position and len(contact.position) > len(merged_data.get('position', '')):
-                    merged_data['position'] = contact.position
-                
-                # Combine sources
-                if contact.source and contact.source != merged_data.get('source'):
-                    current_source = merged_data.get('source', '')
-                    merged_data['source'] = f"{current_source}, {contact.source}".strip(', ')
-            
-            # Update confidence score (average of all contacts, weighted by data completeness)
-            total_confidence = sum(c.confidence_score for c in contacts)
-            data_completeness_bonus = len([v for v in merged_data.values() if v]) * 0.02
-            merged_data['confidence_score'] = min(1.0, (total_confidence / len(contacts)) + data_completeness_bonus)
-            
-            return ContactResult(**merged_data)
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Contact merging failed: {e}")
-            # Return the contact with highest confidence
-            return max(contacts, key=lambda c: c.confidence_score)
-    
-    def _final_dedup_validation(self, contacts: List[ContactResult]) -> List[ContactResult]:
-        """Final validation to catch any remaining duplicates"""
-        try:
-            # Quick check for exact matches that might have been missed
-            seen_emails = set()
-            seen_linkedin = set()
-            final_contacts = []
-            
-            for contact in contacts:
-                skip = False
-                
-                # Check email
-                if contact.email:
-                    email_normalized = contact.email.lower().strip()
-                    if email_normalized in seen_emails:
-                        skip = True
-                    else:
-                        seen_emails.add(email_normalized)
-                
-                # Check LinkedIn URL
-                if contact.linkedin_url and not skip:
-                    linkedin_normalized = self._normalize_linkedin_url(contact.linkedin_url)
-                    if linkedin_normalized in seen_linkedin:
-                        skip = True
-                    else:
-                        seen_linkedin.add(linkedin_normalized)
-                
-                if not skip:
-                    final_contacts.append(contact)
-            
-            return final_contacts
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Final validation failed: {e}")
-            return contacts
-    
-    def _basic_deduplicate(self, results: List[ContactResult]) -> List[ContactResult]:
-        """Fallback basic deduplication method"""
-        try:
-            seen = set()
-            unique_results = []
-            
-            for result in results:
-                # Create identifier for deduplication
-                identifier_parts = []
-                
-                if result.email:
-                    identifier_parts.append(result.email.lower())
-                else:
-                    if result.name:
-                        identifier_parts.append(result.name.lower())
-                    if result.company:
-                        identifier_parts.append(result.company.lower())
-                
-                identifier = "|".join(identifier_parts)
-                
-                if identifier and identifier not in seen:
-                    seen.add(identifier)
-                    unique_results.append(result)
-            
-            return unique_results
-            
-        except Exception as e:
-            logger.debug(f"⚠️ Basic deduplication failed: {e}")
-            return results
-    
-    # Normalization helper methods
-    def _normalize_name(self, name: str) -> str:
-        """Normalize name for comparison"""
-        try:
-            if not name:
-                return ""
-            
-            # Remove extra whitespace, convert to lowercase
-            normalized = re.sub(r'\s+', ' ', name.strip().lower())
-            return normalized
-            
-        except:
-            return name.lower() if name else ""
-    
-    def _normalize_company_name(self, company: str) -> str:
-        """Normalize company name for comparison"""
-        try:
-            if not company:
-                return ""
-            
-            normalized = company.lower().strip()
-            
-            # Remove common company suffixes
-            suffixes = ['inc.', 'inc', 'corp.', 'corp', 'ltd.', 'ltd', 'llc', 'llp', 
-                       'co.', 'co', 'company', 'corporation', 'limited']
-            
-            for suffix in suffixes:
-                if normalized.endswith(' ' + suffix):
-                    normalized = normalized[:-len(suffix)-1].strip()
-                elif normalized.endswith(suffix):
-                    normalized = normalized[:-len(suffix)].strip()
-            
-            # Remove extra whitespace
-            normalized = re.sub(r'\s+', ' ', normalized)
-            
-            return normalized
-            
-        except:
-            return company.lower() if company else ""
-    
-    def _normalize_linkedin_url(self, url: str) -> str:
-        """Normalize LinkedIn URL for comparison"""
-        try:
-            if not url:
-                return ""
-            
-            # Extract the profile ID from LinkedIn URL
-            match = re.search(r'/in/([^/?]+)', url.lower())
-            return match.group(1) if match else url.lower()
-            
-        except:
-            return url.lower() if url else ""
-    
-    def _is_better_email(self, email1: str, email2: str) -> bool:
-        """Determine which email is better (professional vs generic)"""
-        try:
-            if not email2:  # If no existing email, new one is better
-                return True
-            
-            # Prefer professional emails over generic ones
-            generic_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com']
-            
-            email1_is_generic = any(domain in email1.lower() for domain in generic_domains)
-            email2_is_generic = any(domain in email2.lower() for domain in generic_domains)
-            
-            # If one is professional and other is generic, prefer professional
-            if not email1_is_generic and email2_is_generic:
-                return True
-            elif email1_is_generic and not email2_is_generic:
-                return False
-            
-            # If both are same type, prefer longer email (likely more complete)
-            return len(email1) > len(email2)
-            
-        except:
-            return False
-    
-    def _get_text_around_name(self, name: str, text: str, window: int = 100) -> str:
-        """Get text context around a name mention"""
-        try:
-            name_index = text.lower().find(name.lower())
-            if name_index == -1:
-                return ""
-            
-            start = max(0, name_index - window)
-            end = min(len(text), name_index + len(name) + window)
-            
-            return text[start:end]
-            
-        except:
-            return ""
-    
-    def _extract_position_near_name(self, name: str, context: str, target_position: Optional[str] = None) -> Optional[str]:
-        """Extract position information near a person's name"""
-        if target_position and target_position.lower() in context.lower():
-            return target_position
-        
-        # Look for positions near the name
-        position_indicators = ['CEO', 'CTO', 'CFO', 'VP', 'Director', 'Manager', 'President']
-        
-        for indicator in position_indicators:
-            if indicator.lower() in context.lower():
-                return indicator
-        
-        return None
-    
-    def _extract_email_near_name(self, name: str, text: str) -> Optional[str]:
-        """Extract email address associated with a person's name"""
-        # Look for emails in proximity to the name
-        name_words = name.lower().split()
-        
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        emails = re.findall(email_pattern, text, re.IGNORECASE)
-        
-        # Check if any email contains parts of the name
-        for email in emails:
-            email_lower = email.lower()
-            if any(word in email_lower for word in name_words if len(word) > 2):
-                return email
-        
-        return emails[0] if emails else None
-    
-    def _extract_company_from_context(self, context: str) -> Optional[str]:
-        """Extract company name from context"""
-        company_patterns = [
-            r'\bat\s+([A-Z][a-zA-Z\s&]+(?:Inc|LLC|Corp|Ltd|Co)\.?)\b',
-            r'([A-Z][a-zA-Z\s&]+(?:Inc|LLC|Corp|Ltd|Co)\.?)'
-        ]
-        
-        for pattern in company_patterns:
-            matches = re.findall(pattern, context)
-            if matches:
-                return matches[0].strip()
-        
-        return None
-    
-    def _extract_location_from_context(self, context: str, params: SearchParameters) -> Optional[str]:
-        """Extract location from context"""
-        if params.city and params.country:
-            return f"{params.city}, {params.country}"
-        
-        location_patterns = [
-            r'\b([A-Z][a-z]+),\s*([A-Z]{2,})\b',
-            r'in\s+([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)?)\b'
-        ]
-        
-        for pattern in location_patterns:
-            matches = re.findall(pattern, context)
-            if matches:
-                if isinstance(matches[0], tuple):
-                    return ', '.join(matches[0])
-                return matches[0]
-        
-        return None
-    
-    def _extract_directory_links(self, soup: BeautifulSoup) -> List[str]:
-        """Extract directory profile links from search results"""
-        links = []
-        try:
-            for a_tag in soup.find_all('a', href=True):
-                href = a_tag['href']
-                if any(domain in href for domain in ['crunchbase.com', 'bloomberg.com/profile']):
-                    if href not in links:
-                        links.append(href)
-                        if len(links) >= 5:
-                            break
-            return links
-        except:
+    def _deduplicate_contacts(self, new_contacts: List[ContactResult], 
+                            cached_contacts: List[ContactResult]) -> List[ContactResult]:
+        """Remove duplicates between new and cached contacts"""
+        if not new_contacts:
             return []
-    
-    async def _scrape_directory_page(self, url: str, params: SearchParameters) -> List[ContactResult]:
-        """Scrape individual directory page"""
-        try:
-            await self._respectful_delay()
-            
-            response = await self.session.get(url)
-            if response.status_code == 200:
-                html = response.text  # httpx decodes automatically
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # Extract contacts from directory page
-                # This would be customized based on each directory's structure
-                contacts = []
-                
-                # Basic extraction for common directory patterns
-                text_content = soup.get_text()
-                contact_info = self._extract_contact_information(text_content, url, params)
-                
-                if contact_info:
-                    contacts.append(ContactResult(**contact_info))
-                
-                return contacts
-            
-            return []
-            
-        except Exception as e:
-            logger.debug(f"Directory page scraping error: {e}")
-            return []
-    
-    async def _respectful_delay(self):
-        """Apply respectful delays between requests"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
         
-        if time_since_last < self.min_delay:
-            sleep_time = self.min_delay - time_since_last + random.uniform(1, 2)
-            await asyncio.sleep(sleep_time)
+        # Create sets of existing identifiers
+        cached_linkedin = {c.linkedin_url for c in cached_contacts if c.linkedin_url}
+        cached_names = {c.name.lower() for c in cached_contacts if c.name}
         
-        self.last_request_time = time.time()
-        self.request_count += 1
+        unique_contacts = []
+        seen_linkedin = set()
+        seen_names = set()
+        
+        for contact in new_contacts:
+            # Skip if duplicate with cache
+            if contact.linkedin_url and contact.linkedin_url in cached_linkedin:
+                continue
+                
+            if contact.name and contact.name.lower() in cached_names:
+                continue
+            
+            # Skip if duplicate within new contacts
+            if contact.linkedin_url and contact.linkedin_url in seen_linkedin:
+                continue
+                
+            name_key = contact.name.lower() if contact.name else None
+            if name_key and name_key in seen_names:
+                continue
+            
+            # Add to unique list
+            unique_contacts.append(contact)
+            
+            if contact.linkedin_url:
+                seen_linkedin.add(contact.linkedin_url)
+            if name_key:
+                seen_names.add(name_key)
+        
+        logger.info(f"🔄 Deduplication: {len(unique_contacts)} unique from {len(new_contacts)} new contacts")
+        return unique_contacts
+    
+    async def cleanup_cache(self):
+        """Clean up old cache entries"""
+        self.cache.cleanup_old_cache()
     
     async def close(self):
-        """Clean up resources"""
-        try:
-            if self.browser_page:
-                self.browser_page.quit()
-                self.browser_page = None
-                self._browser_available = False
-            
-            if self.session:
-                await self.session.aclose()
-                self.session = None
-                
-            logger.info("✅ Scraper cleaned up")
-        except Exception as e:
-            logger.debug(f"Cleanup error: {e}")
+        """Close all clients"""
+        if self.google_client:
+            await self.google_client.close()
+        if self.openai_validator:
+            await self.openai_validator.close()
 
-# API Models (same as before)
+# FastAPI Models
 class SearchRequest(BaseModel):
+    query: str = Field(..., description="Main search query")
     industry: Optional[str] = Field(None, description="Target industry")
     position: Optional[str] = Field(None, description="Job position/title")
     company: Optional[str] = Field(None, description="Company name")
     country: Optional[str] = Field(None, description="Country")
     city: Optional[str] = Field(None, description="City")
-    keywords: Optional[str] = Field(None, description="Additional keywords")
+    keywords: Optional[str] = Field(None, description="Additional search keywords (e.g., 'site:company.com')")
     experience_level: Optional[str] = Field(None, description="Experience level")
     company_size: Optional[str] = Field(None, description="Company size")
     max_results: int = Field(50, ge=1, le=100, description="Maximum results")
-    min_confidence: float = Field(0.25, ge=0.0, le=1.0, description="Minimum confidence score")
+    min_confidence: float = Field(0.6, ge=0.0, le=1.0, description="Minimum confidence score")
+    use_ai_validation: bool = Field(True, description="Enable AI validation")
+    enable_caching: bool = Field(True, description="Enable smart caching")
 
 class ContactResponse(BaseModel):
     name: str
     position: Optional[str] = None
     company: Optional[str] = None
     location: Optional[str] = None
+    country: Optional[str] = None
+    industry: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    company_website: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    profile_url: Optional[str] = None
-    industry: Optional[str] = None
-    experience: Optional[str] = None
-    summary: Optional[str] = None
-    source: Optional[str] = None
-    scraped_at: Optional[str] = None
+    experience_level: Optional[str] = None
+    profile_summary: Optional[str] = None
+    search_query: Optional[str] = None
+    search_source: str
     confidence_score: float
+    ai_validation_score: Optional[float] = None
+    quality_notes: Optional[str] = None
+    scraped_at: str
+    cache_hit: bool
 
 class SearchResponse(BaseModel):
     success: bool
     message: str
     total_results: int
+    cached_results: int
+    new_results: int
+    cache_hit_rate: float
     contacts: List[ContactResponse]
     search_params: dict
-    methods_used: List[str]
+    ai_validation_used: bool
     data_quality: str
 
 # FastAPI Application
 app = FastAPI(
-    title="Railway Contact Scraper - DuckDuckGo Fixed",
-    description="Professional contact scraper with DuckDuckGo search (broken query bug fixed) and Railway optimization",
-    version="6.4.0-DUCKDUCKGO-FIXED"
+    title="Railway Contact Scraper - Google API Powered",
+    description="Professional contact scraper using Google Custom Search API - No more timeouts!",
+    version="2.0.0-GOOGLE-API"
 )
 
 # CORS
@@ -1659,12 +1006,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global scraper - HTTP-first with browser fallback
-scraper = RailwayContactScraper(enable_browser=True)
+# Global scraper instance
+scraper = RailwayContactScraperAPI()
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 Railway Contact Scraper starting up - Google search with browser fallback...")
+    logger.info("🚀 Railway Contact Scraper starting up with Google Custom Search API...")
+    # Clean up old cache on startup
+    await scraper.cleanup_cache()
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -1674,29 +1023,39 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     return {
-        "message": "Railway Contact Scraper - DuckDuckGo Universal Search",
+        "message": "Railway Contact Scraper - Google API Powered",
         "status": "healthy",
-        "version": "6.4.0-DUCKDUCKGO-FIXED",
-        "architecture": "HTTP-first with browser fallback",
-        "search_engine": "DuckDuckGo (primary)",
-        "search_scope": "Universal search (user-controllable)",
-        "bug_fixes": [
-            "FIXED: Broken query with double-encoded spaces",
-            "FIXED: Consolidated into single universal search method",
-            "FIXED: Proper DuckDuckGo result parsing"
-        ],
+        "version": "2.0.0-GOOGLE-API",
+        "architecture": "Google Custom Search API + OpenAI Validation",
         "features": [
-            "PRIMARY: Universal DuckDuckGo search via HTTP",
-            "FALLBACK: Browser automation (if needed)",
-            "USER-CONTROLLED: Use 'keywords' parameter to specify sites",
-            "Advanced fuzzy deduplication",
-            "REAL contact data only - Railway optimized"
+            "✅ No more browser timeouts - uses Google API directly",
+            "✅ Smart caching system with SQLite",
+            "✅ OpenAI-powered lead validation",
+            "✅ Advanced deduplication",
+            "✅ Railway-optimized performance",
+            "✅ Professional contact data only"
         ],
-        "examples": {
-            "search_all_web": "Default behavior - searches entire web",
-            "search_linkedin_only": "Add 'keywords': 'site:linkedin.com/in'",
-            "search_company_site": "Add 'keywords': 'site:company.com'",
-            "search_multiple_sites": "Add 'keywords': 'site:linkedin.com OR site:company.com'"
+        "api_status": {
+            "google_api_configured": scraper.google_client is not None,
+            "openai_api_configured": scraper.openai_validator is not None,
+            "caching_enabled": scraper.cache is not None
+        },
+        "search_examples": {
+            "linkedin_professionals": {
+                "query": "software engineer",
+                "company": "Google",
+                "keywords": "site:linkedin.com/in/"
+            },
+            "company_executives": {
+                "query": "CEO startup",
+                "industry": "technology",
+                "country": "United States"
+            },
+            "specific_role": {
+                "query": "marketing director",
+                "position": "Marketing Director",
+                "keywords": "site:linkedin.com/in/"
+            }
         }
     }
 
@@ -1705,47 +1064,55 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "6.4.0-DUCKDUCKGO-FIXED", 
-        "architecture": "HTTP-first with browser fallback",
-        "search_engine": "DuckDuckGo (primary)",
-        "search_scope": "Universal search (user-controllable)",
-        "http_session_ready": scraper.session is not None,
-        "browser_available": scraper._browser_available,
-        "data_quality": "REAL contacts - DuckDuckGo search",
+        "version": "2.0.0-GOOGLE-API",
+        "architecture": "Google Custom Search API",
+        "google_api_ready": scraper.google_client is not None,
+        "openai_api_ready": scraper.openai_validator is not None,
+        "caching_ready": scraper.cache is not None,
+        "request_count": scraper.request_count,
         "railway_optimized": True,
-        "bug_status": "FIXED - No more broken queries"
+        "no_browser_needed": True,
+        "reliability": "High - No timeout issues"
     }
 
 @app.post("/search", response_model=SearchResponse)
 async def search_contacts(request: SearchRequest):
-    """Search for REAL contacts - Railway optimized"""
+    """Search for professional contacts using Google Custom Search API"""
     try:
         search_params = SearchParameters(**request.dict())
         
-        # Perform REAL contact search
+        # Perform the search
         results = await scraper.search_contacts(search_params)
         
         # Convert to response format
         contacts = [ContactResponse(**asdict(contact)) for contact in results]
         
-        # Determine methods used
-        methods = list(set([contact.source for contact in results if contact.source]))
+        # Calculate metrics
+        cached_count = sum(1 for contact in results if contact.cache_hit)
+        new_count = len(results) - cached_count
+        cache_hit_rate = (cached_count / len(results)) if results else 0.0
         
-        # Determine data quality based on number of sources
-        if len(methods) >= 2:
-            data_quality = "HIGH - Multiple sources"
-        elif len(methods) == 1:
-            data_quality = "GOOD - Single source"
+        # Determine data quality
+        avg_confidence = sum(contact.confidence_score for contact in results) / len(results) if results else 0
+        if avg_confidence >= 0.8:
+            data_quality = "EXCELLENT - High confidence leads"
+        elif avg_confidence >= 0.6:
+            data_quality = "GOOD - Quality professional contacts"
+        elif avg_confidence >= 0.4:
+            data_quality = "FAIR - Some leads may need verification"
         else:
-            data_quality = "NO RESULTS - Try different search parameters"
+            data_quality = "LOW - Consider refining search criteria"
         
         return SearchResponse(
             success=True,
-            message=f"Found {len(results)} REAL contacts using DuckDuckGo search ({len(methods)} methods)",
+            message=f"Found {len(results)} professional contacts using Google Custom Search API",
             total_results=len(results),
+            cached_results=cached_count,
+            new_results=new_count,
+            cache_hit_rate=cache_hit_rate,
             contacts=contacts,
             search_params=asdict(search_params),
-            methods_used=methods,
+            ai_validation_used=search_params.use_ai_validation and scraper.openai_validator is not None,
             data_quality=data_quality
         )
         
@@ -1753,61 +1120,76 @@ async def search_contacts(request: SearchRequest):
         logger.error(f"❌ Search failed: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
-@app.get("/test/browser")
-async def test_browser():
-    """Test browser initialization in Railway - FALLBACK ONLY"""
+@app.get("/cache/stats")
+async def cache_stats():
+    """Get cache statistics"""
     try:
-        browser_ready = await scraper._init_browser_with_patience()
+        conn = sqlite3.connect(scraper.cache.cache_file)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM contacts")
+        total_contacts = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(DISTINCT search_hash) FROM contacts")
+        unique_searches = cursor.fetchone()[0]
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM contacts 
+            WHERE created_at > datetime('now', '-7 days')
+        """)
+        recent_contacts = cursor.fetchone()[0]
+        
+        conn.close()
         
         return {
-            "success": browser_ready,
-            "message": "Browser fallback test completed",
-            "browser_available": scraper._browser_available,
-            "retry_count": scraper.browser_retry_count,
-            "architecture": "HTTP-first with browser fallback",
-            "note": "Browser is FALLBACK only - HTTP scraping is primary method in Railway"
+            "total_cached_contacts": total_contacts,
+            "unique_search_queries": unique_searches,
+            "recent_contacts_7_days": recent_contacts,
+            "cache_file": scraper.cache.cache_file,
+            "cache_enabled": True
         }
         
     except Exception as e:
+        logger.error(f"❌ Cache stats failed: {e}")
         return {
-            "success": False,
-            "message": f"Browser fallback test failed: {e}",
-            "browser_available": scraper._browser_available,
-            "architecture": "HTTP-first with browser fallback",
-            "note": "Browser unavailable - this is fine, HTTP scraping is primary"
+            "error": str(e),
+            "cache_enabled": False
         }
 
-@app.get("/api/scraper-status")
-async def get_scraper_status():
-    """Get detailed scraper status - DuckDuckGo search architecture"""
+@app.post("/cache/cleanup")
+async def cleanup_cache():
+    """Clean up old cache entries"""
+    try:
+        await scraper.cleanup_cache()
+        return {
+            "success": True,
+            "message": "Cache cleanup completed",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Cache cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cache cleanup failed: {str(e)}")
+
+@app.get("/api/config")
+async def get_configuration():
+    """Get current API configuration"""
     return {
-        "architecture": "HTTP-first with browser fallback",
-        "search_engine": "DuckDuckGo (primary)",
-        "search_scope": "Universal search (user-controllable)",
-        "http_session_ready": scraper.session is not None,
-        "browser_available": scraper._browser_available,
-        "browser_fallback_enabled": scraper.enable_browser,
-        "browser_retries": scraper.browser_retry_count,
-        "request_count": scraper.request_count,
-        "last_request_time": scraper.last_request_time,
-        "version": "6.4.0-DUCKDUCKGO-FIXED",
-        "data_source": "REAL web scraping - DuckDuckGo search",
-        "railway_optimized": True,
-        "bug_fixes": [
-            "FIXED: Broken query with double-encoded spaces",
-            "FIXED: Consolidated into single search method",
-            "FIXED: Proper result parsing"
-        ],
-        "search_control": {
-            "default": "Searches entire web via DuckDuckGo",
-            "linkedin_only": "Use keywords: 'site:linkedin.com/in'",
-            "company_site": "Use keywords: 'site:company.com'",
-            "multiple_sites": "Use keywords: 'site:linkedin.com OR site:company.com'"
+        "google_custom_search": {
+            "api_configured": GOOGLE_API_KEY is not None,
+            "search_engine_configured": SEARCH_ENGINE_ID is not None,
+            "status": "✅ Ready" if (GOOGLE_API_KEY and SEARCH_ENGINE_ID) else "❌ Not configured"
         },
-        "priority_order": [
-            "1. Universal DuckDuckGo search via HTTP (user-controlled)",
-            "2. Browser automation (fallback only)"
-        ]
+        "openai_validation": {
+            "api_configured": OPENAI_API_KEY is not None,
+            "status": "✅ Ready" if OPENAI_API_KEY else "❌ Not configured - validation disabled"
+        },
+        "caching_system": {
+            "enabled": True,
+            "type": "SQLite",
+            "status": "✅ Ready"
+        },
+        "architecture": "Google Custom Search API + OpenAI + SQLite Cache",
+        "reliability": "High - No browser dependencies or timeout issues"
     }
 
 if __name__ == "__main__":
