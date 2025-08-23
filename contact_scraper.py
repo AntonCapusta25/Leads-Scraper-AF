@@ -21,7 +21,7 @@ import os
 import tempfile
 import requests
 from bs4 import BeautifulSoup
-import aiohttp
+import httpx
 
 # API Framework
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -192,6 +192,7 @@ class RailwayContactScraper:
             co.set_argument('--disable-images')  # Faster loading
             co.set_argument('--no-first-run')
             co.set_argument('--disable-default-apps')
+            # NOTE: JavaScript is ENABLED - essential for modern websites
             
             # Human-like user agent
             co.set_argument(f'--user-agent={self.http_headers["User-Agent"]}')
@@ -252,20 +253,15 @@ class RailwayContactScraper:
         """Initialize HTTP session for real web scraping"""
         try:
             if not self.session:
-                # Create session with connection pooling and timeouts
-                connector = aiohttp.TCPConnector(
-                    limit=10,
-                    limit_per_host=5,
-                    ttl_dns_cache=300,
-                    use_dns_cache=True,
-                )
-                timeout = aiohttp.ClientTimeout(total=30, connect=10)
+                # Create httpx async client
+                limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
+                timeout = httpx.Timeout(30.0, connect=10.0)
                 
-                self.session = aiohttp.ClientSession(
+                self.session = httpx.AsyncClient(
                     headers=self.http_headers,
-                    connector=connector,
+                    limits=limits,
                     timeout=timeout,
-                    cookie_jar=aiohttp.CookieJar()
+                    follow_redirects=True
                 )
                 logger.info("✅ HTTP session initialized for real web scraping")
             return True
@@ -579,10 +575,10 @@ class RailwayContactScraper:
                     
                     await self._respectful_delay()
                     
-                    async with self.session.get(search_url) as response:
-                        if response.status == 200:
-                            html = await response.text()
-                            soup = BeautifulSoup(html, 'html.parser')
+                    response = await self.session.get(search_url)
+                    if response.status_code == 200:
+                        html = response.text  # httpx decodes automatically
+                        soup = BeautifulSoup(html, 'html.parser')
                             
                             # Extract company website URLs
                             company_urls = self._extract_company_urls(soup, params.company)
@@ -613,8 +609,9 @@ class RailwayContactScraper:
             await self._respectful_delay()
             
             async with self.session.get(url) as response:
-                if response.status == 200:
-                    html = await response.text()
+                if response.status_code == 200:
+                    html = await response.aread()
+                    html = html.decode('utf-8', errors='ignore')
                     soup = BeautifulSoup(html, 'html.parser')
                     
                     # Look for team/about sections
@@ -815,8 +812,9 @@ class RailwayContactScraper:
             await self._respectful_delay()
             
             async with self.session.get(search_url) as response:
-                if response.status == 200:
-                    html = await response.text()
+                if response.status_code == 200:
+                    html = await response.aread()
+                    html = html.decode('utf-8', errors='ignore')
                     soup = BeautifulSoup(html, 'html.parser')
                     
                     # Extract LinkedIn profile URLs
@@ -1226,8 +1224,9 @@ class RailwayContactScraper:
             await self._respectful_delay()
             
             async with self.session.get(url) as response:
-                if response.status == 200:
-                    html = await response.text()
+                if response.status_code == 200:
+                    html = await response.aread()
+                    html = html.decode('utf-8', errors='ignore')
                     soup = BeautifulSoup(html, 'html.parser')
                     
                     # Extract contacts from directory page
@@ -1270,7 +1269,7 @@ class RailwayContactScraper:
                 self._browser_available = False
             
             if self.session:
-                await self.session.close()
+                await self.session.aclose()
                 self.session = None
                 
             logger.info("✅ Scraper cleaned up")
