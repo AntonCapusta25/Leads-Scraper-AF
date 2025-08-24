@@ -67,12 +67,20 @@ class SearchParameters:
     enable_enrichment: bool = False  # New parameter for contact enrichment
     
     def to_search_query(self) -> str:
-        """Convert to optimized Google search query"""
+        """Convert to optimized Google search query that finds people, not articles"""
         parts = []
         
-        # Core search terms
+        # Core search terms with person-focused approach
         if self.query:
-            parts.append(f'"{self.query}"')
+            # If query looks like a business/industry term, make it person-focused
+            if any(business_term in self.query.lower() for business_term in 
+                   ['construction', 'business', 'company', 'industry', 'firm', 'services']):
+                # Convert business query to people query
+                person_focused_query = f'"{self.query}" (CEO OR founder OR owner OR manager OR director)'
+            else:
+                person_focused_query = f'"{self.query}"'
+            parts.append(person_focused_query)
+        
         if self.position:
             parts.append(f'"{self.position}"')
         if self.company:
@@ -87,13 +95,17 @@ class SearchParameters:
             parts.append(f'"{self.country}"')
         elif self.city:
             parts.append(f'"{self.city}"')
-            
-        # Additional keywords
+        
+        # Enhanced keywords logic
         if self.keywords:
             parts.append(self.keywords)
         else:
-            # Default to LinkedIn profiles
+            # Default to people-focused search
             parts.append('site:linkedin.com/in/')
+            # Add person indicators to avoid articles
+            parts.append('(profile OR "works at" OR "CEO" OR "founder" OR "manager")')
+            # Exclude article-like content
+            parts.append('-"how to" -guide -tips -"best practices" -article -blog -news')
             
         return " ".join(parts)
 
@@ -625,7 +637,7 @@ class ContactEnrichmentCrawler:
         return enriched_contacts
     
     async def _http_enrich_single_contact(self, contact: ContactResult, session: httpx.AsyncClient) -> ContactResult:
-        """HTTP-based single contact enrichment"""
+        """HTTP-based single contact enrichment with proper DuckDuckGo handling"""
         enriched_data = asdict(contact)
         found_emails = set()
         found_phones = set()
@@ -633,6 +645,11 @@ class ContactEnrichmentCrawler:
         enrichment_notes = []
         
         try:
+            # Skip enrichment for obviously non-person names
+            if not self._is_enrichable_contact(contact):
+                logger.debug(f"⏭️ Skipping enrichment for non-person: {contact.name}")
+                return contact
+            
             # Strategy 1: Check LinkedIn profile directly (if accessible)
             if contact.linkedin_url:
                 try:
@@ -655,20 +672,27 @@ class ContactEnrichmentCrawler:
                 except Exception as e:
                     logger.debug(f"LinkedIn check failed: {e}")
             
-            # Strategy 2: Search for person + company contact pages
-            if contact.name and contact.company:
-                search_queries = [
-                    f'"{contact.name}" "{contact.company}" email contact',
-                    f'"{contact.name}" "{contact.company}" phone',
-                    f'"{contact.company}" team "{contact.name}"'
-                ]
+            # Strategy 2: Use alternative search engines that work better with API calls
+            if contact.name and contact.company and len(contact.name.split()) >= 2:
+                # Build clean, simple search queries
+                clean_searches = self._build_clean_search_queries(contact)
                 
-                for query in search_queries[:2]:  # Limit searches
+                for search_query in clean_searches[:2]:  # Limit searches
                     try:
-                        # Use DuckDuckGo HTML search
-                        search_url = f"https://duckduckgo.com/html/?q={quote(query)}"
+                        # Use Bing instead of DuckDuckGo (more API-friendly)
+                        search_url = f"https://www.bing.com/search?q={quote(search_query)}&format=html"
                         
-                        response = await session.get(search_url)
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.5',
+                            'Accept-Encoding': 'gzip, deflate',
+                            'Cache-Control': 'no-cache',
+                            'Pragma': 'no-cache'
+                        }
+                        
+                        response = await session.get(search_url, headers=headers, timeout=15)
+                        
                         if response.status_code == 200:
                             # Extract contact info from search results
                             text = response.text
@@ -684,31 +708,48 @@ class ContactEnrichmentCrawler:
                             
                             if person_emails:
                                 enrichment_notes.append(f"Search enrichment: {len(person_emails)} relevant emails")
+                        else:
+                            logger.debug(f"Search failed: {response.status_code}")
                         
                         # Respectful delay between searches
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(2)
                         
                     except Exception as e:
-                        logger.debug(f"Search enrichment failed: {e}")
+                        logger.debug(f"Search enrichment failed for '{search_query}': {e}")
                         continue
             
-            # Strategy 3: Company website check (if available)
-            if contact.company:
+            # Strategy 3: Direct company website check (if available)
+            if contact.company and len(contact.company) > 3:
                 company_domain = self._guess_company_domain(contact.company)
                 if company_domain:
                     try:
-                        response = await session.get(f"https://{company_domain}/about", timeout=10)
-                        if response.status_code == 200:
-                            text = response.text
-                            
-                            # Look for team/contact info
-                            if contact.name.lower() in text.lower():
-                                emails = self._extract_emails_from_text(text)
-                                person_emails = self._filter_person_emails(emails, contact.name, contact.company)
-                                found_emails.update(person_emails)
+                        # Try common contact pages
+                        contact_pages = ['/about', '/team', '/contact', '/leadership', '/people']
+                        
+                        for page in contact_pages[:2]:  # Limit pages
+                            try:
+                                response = await session.get(f"https://{company_domain}{page}", 
+                                                           timeout=10, follow_redirects=True)
+                                if response.status_code == 200:
+                                    text = response.text
+                                    
+                                    # Look for person's name on company website
+                                    if any(name_part.lower() in text.lower() 
+                                          for name_part in contact.name.split() if len(name_part) > 2):
+                                        
+                                        emails = self._extract_emails_from_text(text)
+                                        person_emails = self._filter_person_emails(emails, contact.name, contact.company)
+                                        found_emails.update(person_emails)
+                                        
+                                        if person_emails:
+                                            enrichment_notes.append(f"Company website ({page}): {len(person_emails)} emails")
+                                            break  # Found on this page, no need to check others
                                 
-                                if person_emails:
-                                    enrichment_notes.append(f"Company website: {len(person_emails)} emails")
+                                await asyncio.sleep(1)  # Brief delay between pages
+                                
+                            except Exception as e:
+                                logger.debug(f"Company page check failed for {company_domain}{page}: {e}")
+                                continue
                         
                     except Exception as e:
                         logger.debug(f"Company website check failed: {e}")
@@ -732,6 +773,8 @@ class ContactEnrichmentCrawler:
             # Update enrichment summary
             if enrichment_notes:
                 enriched_data['profile_summary'] = "HTTP enriched: " + "; ".join(enrichment_notes)
+            elif not found_emails and not found_phones:
+                enriched_data['profile_summary'] = "HTTP enrichment completed - no additional contact data found"
             
             # Boost confidence if we found contact info
             if found_emails or found_phones:
@@ -744,6 +787,70 @@ class ContactEnrichmentCrawler:
             logger.warning(f"⚠️ HTTP enrichment failed for {contact.name}: {e}")
         
         return ContactResult(**enriched_data)
+    
+    def _is_enrichable_contact(self, contact: ContactResult) -> bool:
+        """Check if contact is worth enriching (actual person vs article/business name)"""
+        try:
+            name = contact.name
+            
+            if not name or len(name.split()) < 2:
+                return False
+            
+            # Skip obvious non-person names
+            non_person_indicators = [
+                'construction', 'business', 'industry', 'services', 'solutions',
+                'software', 'legal', 'consulting', 'global', 'international',
+                'key', 'main', 'primary', 'technical', 'readiness', 'dimensions',
+                'liability', 'funding', 'circle', 'accounting', 'fail', 'fails'
+            ]
+            
+            name_lower = name.lower()
+            if any(indicator in name_lower for indicator in non_person_indicators):
+                return False
+            
+            # Must look like actual first/last name
+            name_parts = name.split()
+            if len(name_parts) < 2:
+                return False
+            
+            # Each part should be a proper name (capitalized, reasonable length)
+            for part in name_parts:
+                if not (part[0].isupper() and part[1:].islower() and 2 <= len(part) <= 20):
+                    return False
+            
+            return True
+            
+        except:
+            return False
+    
+    def _build_clean_search_queries(self, contact: ContactResult) -> List[str]:
+        """Build clean, simple search queries that work with search engines"""
+        queries = []
+        
+        try:
+            name_parts = contact.name.split()
+            if len(name_parts) >= 2:
+                first_name = name_parts[0]
+                last_name = name_parts[-1]
+                
+                # Simple, clean queries
+                if contact.company:
+                    # Person name + company + email/contact
+                    clean_company = contact.company.replace('"', '').strip()[:50]  # Limit length
+                    queries.append(f"{first_name} {last_name} {clean_company} email")
+                    queries.append(f"{first_name} {last_name} {clean_company} contact")
+                
+                # Person name + industry + location
+                if contact.country:
+                    queries.append(f"{first_name} {last_name} construction {contact.country}")
+                
+                # Fallback: just person name + email
+                queries.append(f'"{first_name} {last_name}" email contact')
+            
+        except Exception as e:
+            logger.debug(f"Query building failed: {e}")
+        
+        return queries[:3]  # Limit to 3 queries max
     
     def _filter_person_emails(self, emails: List[str], person_name: str, company_name: Optional[str] = None) -> List[str]:
         """Filter emails to find ones likely belonging to the person"""
@@ -1514,11 +1621,15 @@ class RailwayContactScraperAPI:
         return final_results
     
     def _parse_search_result(self, item: Dict, params: SearchParameters) -> Optional[ContactResult]:
-        """Parse Google search result into ContactResult"""
+        """Parse Google search result into ContactResult with better person filtering"""
         try:
             title = item.get('title', '')
             link = item.get('link', '')
             snippet = item.get('snippet', '')
+            
+            # Early filtering: Skip obvious non-person results
+            if self._is_article_or_business_content(title, snippet):
+                return None
             
             # Skip non-LinkedIn results unless specifically requested
             if 'linkedin.com/in/' not in link and not params.keywords:
@@ -1527,6 +1638,10 @@ class RailwayContactScraperAPI:
             # Extract name from LinkedIn URL or title
             name = self._extract_name_from_linkedin(link) or self._extract_name_from_title(title)
             if not name:
+                return None
+            
+            # Additional validation: name should sound like a person
+            if not self._sounds_like_person_name(name, title, snippet):
                 return None
             
             # Extract other information
@@ -1559,6 +1674,81 @@ class RailwayContactScraperAPI:
         except Exception as e:
             logger.debug(f"⚠️ Failed to parse search result: {e}")
             return None
+    
+    def _is_article_or_business_content(self, title: str, snippet: str) -> bool:
+        """Check if this looks like an article or business content rather than a person"""
+        try:
+            content = f"{title} {snippet}".lower()
+            
+            # Article indicators
+            article_patterns = [
+                r'\b(how to|guide to|tips for|best practices|ways to|steps to)\b',
+                r'\b(industry|business|companies|firms|services|solutions)\b.*\b(in|for|about)\b',
+                r'\b(study|research|report|analysis|survey|white paper)\b',
+                r'\b(market|sector|trends|growth|forecast|outlook)\b',
+                r'\b(blog|article|news|press|media|publication)\b',
+                r'\b(overview|introduction|basics|fundamentals)\b',
+                r'\b(challenges|problems|issues|risks|benefits)\b.*\b(construction|business)\b'
+            ]
+            
+            for pattern in article_patterns:
+                if re.search(pattern, content):
+                    return True
+            
+            # Business/company content indicators  
+            business_indicators = [
+                'construction companies', 'construction firms', 'construction services',
+                'construction industry', 'construction business', 'construction market',
+                'small businesses', 'business owners', 'business growth',
+                'accounting software', 'business software', 'project management',
+                'legal services', 'consulting services', 'financial services'
+            ]
+            
+            if any(indicator in content for indicator in business_indicators):
+                return True
+                
+            # Generic business titles
+            if re.match(r'^(construction|business|industry|services|solutions|software)', title.lower()):
+                return True
+            
+            return False
+            
+        except:
+            return False
+    
+    def _sounds_like_person_name(self, name: str, title: str, snippet: str) -> bool:
+        """Additional check if name sounds like an actual person in context"""
+        try:
+            # Basic name validation already done in _is_valid_name
+            if not self._is_valid_name(name):
+                return False
+            
+            context = f"{title} {snippet}".lower()
+            name_lower = name.lower()
+            
+            # Positive indicators that this is a person
+            person_indicators = [
+                f"{name_lower} is", f"{name_lower} has", f"{name_lower} works",
+                f"{name_lower} founded", f"{name_lower} started", f"{name_lower} joined",
+                "ceo", "founder", "president", "director", "manager", "owner",
+                "linkedin profile", "professional experience", "years of experience"
+            ]
+            
+            person_score = sum(1 for indicator in person_indicators if indicator in context)
+            
+            # Negative indicators (business/article content)
+            business_indicators = [
+                "construction companies", "business guide", "how to", "industry report",
+                "market analysis", "best practices", "software for", "services for"
+            ]
+            
+            business_score = sum(1 for indicator in business_indicators if indicator in context)
+            
+            # Must have more person indicators than business indicators
+            return person_score > business_score
+            
+        except:
+            return True  # Default to allowing if check fails
     
     def _extract_name_from_linkedin(self, url: str) -> Optional[str]:
         """Extract name from LinkedIn URL"""
