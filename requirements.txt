@@ -1,34 +1,23 @@
-# Railway Contact Scraper - Google API + Enrichment Version
-# Google API for primary search + DrissionPage for contact enrichment
+# requirements.txt
 
-# Core FastAPI and web framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+# --- Core Web Framework ---
+# For running the API server
+fastapi
+uvicorn[standard]
 
-# HTTP client for API calls
-httpx==0.25.2
-requests==2.31.0
+# --- HTTP & API Clients ---
+# For making asynchronous calls to Google and OpenAI APIs
+httpx
 
-# HTML parsing (lightweight, no browser needed for primary search)
-beautifulsoup4==4.12.2
-lxml==4.9.3
+# --- HTML Parsing ---
+# For parsing search engine results in the enrichment crawler
+beautifulsoup4
+lxml
 
-# Data processing and validation
-pydantic==2.5.0
-sqlite3  # Built into Python
+# --- Browser Automation (for optional Contact Enrichment) ---
+# Powers the crawler that finds emails and phone numbers
+DrissionPage
 
-# Async support
-asyncio  # Built into Python
-
-# Text processing and similarity
-difflib  # Built into Python
-
-# Environment and utilities
-python-dotenv==1.0.0
-
-# Browser automation for contact enrichment (optional feature)
-DrissionPage==4.0.5.6
-
-# Development and testing (optional)
-pytest==7.4.3
-pytest-asyncio==0.21.1
+# --- Environment Variables ---
+# For loading your API keys from a .env file
+python-dotenv
