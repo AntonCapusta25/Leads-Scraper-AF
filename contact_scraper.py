@@ -396,14 +396,14 @@ class ContactEnrichmentCrawler:
         logger.info(f"🕷️ Contact enrichment crawler initialized (enabled: {enable_crawler})")
     
     async def init_crawler(self) -> bool:
-        """Initialize DrissionPage browser for crawling"""
+        """Initialize DrissionPage browser for crawling with Railway optimizations"""
         if not self.enable_crawler or self._browser_available:
             return self._browser_available
             
         try:
-            logger.info("🌐 Initializing contact enrichment crawler...")
+            logger.info("🌐 Initializing Railway-optimized enrichment crawler...")
             
-            # Import DrissionPage
+            # Import DrissionPage with error handling
             try:
                 from DrissionPage import ChromiumPage, ChromiumOptions
             except ImportError as e:
@@ -411,78 +411,143 @@ class ContactEnrichmentCrawler:
                 self.enable_crawler = False
                 return False
             
-            # Create crawler-optimized browser options
+            # Create Railway-optimized browser options
             co = ChromiumOptions()
             
-            # Find Chrome for Railway
+            # Find Chrome for Railway with better detection
             chrome_paths = [
                 '/nix/store/*/bin/chromium',
                 '/usr/bin/chromium-browser', 
                 '/usr/bin/chromium',
                 '/usr/bin/google-chrome-stable',
-                '/usr/bin/google-chrome'
+                '/usr/bin/google-chrome',
+                '/opt/google/chrome/chrome'
             ]
             
-            chrome_found = False
+            chrome_path = None
             for path_pattern in chrome_paths:
                 if '*' in path_pattern:
                     matches = glob.glob(path_pattern)
                     if matches and os.path.exists(matches[0]):
-                        co.set_browser_path(matches[0])
-                        chrome_found = True
-                        logger.info(f"✅ Found Chrome for enrichment: {matches[0]}")
+                        chrome_path = matches[0]
+                        logger.info(f"✅ Found Chrome for enrichment: {chrome_path}")
                         break
                 elif os.path.exists(path_pattern):
-                    co.set_browser_path(path_pattern)
-                    chrome_found = True
-                    logger.info(f"✅ Found Chrome for enrichment: {path_pattern}")
+                    chrome_path = path_pattern
+                    logger.info(f"✅ Found Chrome for enrichment: {chrome_path}")
                     break
             
-            # Crawler-optimized arguments
+            if chrome_path:
+                co.set_browser_path(chrome_path)
+            else:
+                logger.info("🔍 No specific Chrome path found, using system default...")
+            
+            # Railway-optimized Chrome arguments for better stability
             co.set_argument('--headless=new')
             co.set_argument('--no-sandbox')
             co.set_argument('--disable-dev-shm-usage')
             co.set_argument('--disable-gpu')
-            co.set_argument('--window-size=1280,720')
-            co.set_argument('--disable-web-security')
-            co.set_argument('--disable-features=VizDisplayCompositor')
+            co.set_argument('--disable-software-rasterizer')
+            co.set_argument('--disable-background-timer-throttling')
+            co.set_argument('--disable-backgrounding-occluded-windows')
+            co.set_argument('--disable-renderer-backgrounding')
+            co.set_argument('--disable-features=TranslateUI')
             co.set_argument('--disable-extensions')
             co.set_argument('--disable-plugins')
-            co.set_argument('--disable-images')  # Faster loading
+            co.set_argument('--disable-images')
+            co.set_argument('--disable-javascript')  # We don't need JS for scraping
             co.set_argument('--no-first-run')
+            co.set_argument('--no-default-browser-check')
             co.set_argument('--disable-default-apps')
-            co.set_argument('--disable-background-timer-throttling')
-            co.set_argument('--disable-renderer-backgrounding')
+            co.set_argument('--disable-popup-blocking')
+            co.set_argument('--disable-translate')
+            co.set_argument('--disable-sync')
+            co.set_argument('--metrics-recording-only')
+            co.set_argument('--no-pings')
+            co.set_argument('--disable-web-security')
+            co.set_argument('--disable-features=VizDisplayCompositor')
+            co.set_argument('--window-size=1024,768')  # Smaller window
+            co.set_argument('--memory-pressure-off')
+            co.set_argument('--max_old_space_size=512')  # Limit memory
             
-            # Temp directory
-            temp_dir = tempfile.mkdtemp(prefix='enrichment_chrome_')
+            # Create temp directory with better cleanup
+            temp_dir = tempfile.mkdtemp(prefix='railway_enrichment_')
             co.set_user_data_path(temp_dir)
             
-            # Create browser with timeout
-            def create_browser():
-                return ChromiumPage(addr_or_opts=co)
+            # More aggressive timeout and retry strategy
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"🚀 Attempting browser creation (attempt {attempt + 1}/{max_retries})...")
+                    
+                    # Create browser with shorter timeout
+                    def create_browser():
+                        try:
+                            return ChromiumPage(addr_or_opts=co)
+                        except Exception as e:
+                            logger.warning(f"Browser creation error: {e}")
+                            raise
+                    
+                    self.browser_page = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(None, create_browser),
+                        timeout=20.0  # Shorter timeout
+                    )
+                    
+                    # Quick test with minimal page
+                    logger.info("🧪 Testing browser with minimal page...")
+                    def minimal_test():
+                        try:
+                            # Use a very simple test page
+                            self.browser_page.get("data:text/html,<html><body>test</body></html>", timeout=5)
+                            return True
+                        except Exception as e:
+                            logger.warning(f"Browser test error: {e}")
+                            raise
+                    
+                    await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(None, minimal_test),
+                        timeout=10.0
+                    )
+                    
+                    self._browser_available = True
+                    logger.info("✅ Railway enrichment crawler successfully initialized!")
+                    return True
+                    
+                except asyncio.TimeoutError:
+                    logger.warning(f"⏰ Browser init timeout on attempt {attempt + 1}")
+                    if self.browser_page:
+                        try:
+                            self.browser_page.quit()
+                        except:
+                            pass
+                        self.browser_page = None
+                    
+                    if attempt < max_retries - 1:
+                        logger.info("🔄 Retrying browser initialization...")
+                        await asyncio.sleep(2)  # Brief pause before retry
+                    continue
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Browser init error on attempt {attempt + 1}: {e}")
+                    if self.browser_page:
+                        try:
+                            self.browser_page.quit()
+                        except:
+                            pass
+                        self.browser_page = None
+                    
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1)  # Brief pause before retry
+                    continue
             
-            self.browser_page = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, create_browser),
-                timeout=30.0
-            )
-            
-            # Test browser
-            def test_browser():
-                self.browser_page.get("https://httpbin.org/user-agent", timeout=10)
-                return True
-            
-            await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, test_browser),
-                timeout=15.0
-            )
-            
-            self._browser_available = True
-            logger.info("✅ Contact enrichment crawler ready")
-            return True
+            # If all attempts failed
+            logger.warning("❌ All browser initialization attempts failed")
+            self._browser_available = False
+            self.enable_crawler = False
+            return False
             
         except Exception as e:
-            logger.warning(f"⚠️ Enrichment crawler init failed: {e} - will skip enrichment")
+            logger.warning(f"⚠️ Enrichment crawler setup failed: {e} - will skip enrichment")
             if self.browser_page:
                 try:
                     self.browser_page.quit()
@@ -490,27 +555,33 @@ class ContactEnrichmentCrawler:
                     pass
                 self.browser_page = None
             self._browser_available = False
+            self.enable_crawler = False
             return False
     
     async def enrich_contacts(self, contacts: List[ContactResult]) -> List[ContactResult]:
-        """Enrich contacts with additional crawled data"""
+        """Enrich contacts with additional crawled data - with HTTP fallback"""
         if not self.enable_crawler or not contacts:
             return contacts
             
-        # Initialize crawler if needed
-        if not self._browser_available:
-            crawler_ready = await self.init_crawler()
-            if not crawler_ready:
-                logger.info("⚠️ Contact enrichment unavailable - returning original contacts")
-                return contacts
-        
         logger.info(f"🕷️ Starting contact enrichment for {len(contacts)} contacts...")
         
+        # Try browser-based enrichment first
+        browser_available = await self.init_crawler()
+        
+        if browser_available:
+            logger.info("🌐 Using browser-based enrichment (comprehensive)")
+            return await self._browser_enrich_contacts(contacts)
+        else:
+            logger.info("📡 Using HTTP-based enrichment fallback (lightweight)")
+            return await self._http_enrich_contacts(contacts)
+    
+    async def _browser_enrich_contacts(self, contacts: List[ContactResult]) -> List[ContactResult]:
+        """Browser-based enrichment (original method)"""
         enriched_contacts = []
         
         for i, contact in enumerate(contacts):
             try:
-                logger.info(f"🔍 Enriching contact {i+1}/{len(contacts)}: {contact.name}")
+                logger.info(f"🔍 Browser enriching contact {i+1}/{len(contacts)}: {contact.name}")
                 
                 # Enrich this specific contact
                 enriched_contact = await self._enrich_single_contact(contact)
@@ -525,8 +596,211 @@ class ContactEnrichmentCrawler:
                 # Return original contact if enrichment fails
                 enriched_contacts.append(contact)
         
-        logger.info(f"✅ Contact enrichment completed for {len(enriched_contacts)} contacts")
+        logger.info(f"✅ Browser contact enrichment completed for {len(enriched_contacts)} contacts")
         return enriched_contacts
+    
+    async def _http_enrich_contacts(self, contacts: List[ContactResult]) -> List[ContactResult]:
+        """HTTP-based enrichment fallback (no browser required)"""
+        enriched_contacts = []
+        
+        # Create HTTP session for enrichment
+        async with httpx.AsyncClient(timeout=30.0) as session:
+            for i, contact in enumerate(contacts):
+                try:
+                    logger.info(f"📡 HTTP enriching contact {i+1}/{len(contacts)}: {contact.name}")
+                    
+                    # Enrich via HTTP methods
+                    enriched_contact = await self._http_enrich_single_contact(contact, session)
+                    enriched_contacts.append(enriched_contact)
+                    
+                    # Respectful delay
+                    if i < len(contacts) - 1:
+                        await asyncio.sleep(random.uniform(1, 2))
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to HTTP enrich {contact.name}: {e}")
+                    enriched_contacts.append(contact)
+        
+        logger.info(f"✅ HTTP contact enrichment completed for {len(enriched_contacts)} contacts")
+        return enriched_contacts
+    
+    async def _http_enrich_single_contact(self, contact: ContactResult, session: httpx.AsyncClient) -> ContactResult:
+        """HTTP-based single contact enrichment"""
+        enriched_data = asdict(contact)
+        found_emails = set()
+        found_phones = set()
+        found_websites = set()
+        enrichment_notes = []
+        
+        try:
+            # Strategy 1: Check LinkedIn profile directly (if accessible)
+            if contact.linkedin_url:
+                try:
+                    response = await session.get(contact.linkedin_url, follow_redirects=True)
+                    if response.status_code == 200:
+                        text = response.text
+                        
+                        # Extract any visible contact info
+                        emails = self._extract_emails_from_text(text)
+                        phones = self._extract_phones_from_text(text)
+                        websites = self._extract_websites_from_text(text)
+                        
+                        found_emails.update(emails)
+                        found_phones.update(phones)
+                        found_websites.update(websites)
+                        
+                        if emails or phones:
+                            enrichment_notes.append(f"LinkedIn profile scan: {len(emails)} emails, {len(phones)} phones")
+                        
+                except Exception as e:
+                    logger.debug(f"LinkedIn check failed: {e}")
+            
+            # Strategy 2: Search for person + company contact pages
+            if contact.name and contact.company:
+                search_queries = [
+                    f'"{contact.name}" "{contact.company}" email contact',
+                    f'"{contact.name}" "{contact.company}" phone',
+                    f'"{contact.company}" team "{contact.name}"'
+                ]
+                
+                for query in search_queries[:2]:  # Limit searches
+                    try:
+                        # Use DuckDuckGo HTML search
+                        search_url = f"https://duckduckgo.com/html/?q={quote(query)}"
+                        
+                        response = await session.get(search_url)
+                        if response.status_code == 200:
+                            # Extract contact info from search results
+                            text = response.text
+                            
+                            emails = self._extract_emails_from_text(text)
+                            phones = self._extract_phones_from_text(text)
+                            
+                            # Filter for person-relevant emails
+                            person_emails = self._filter_person_emails(emails, contact.name, contact.company)
+                            
+                            found_emails.update(person_emails)
+                            found_phones.update(phones[:2])  # Limit phones
+                            
+                            if person_emails:
+                                enrichment_notes.append(f"Search enrichment: {len(person_emails)} relevant emails")
+                        
+                        # Respectful delay between searches
+                        await asyncio.sleep(1)
+                        
+                    except Exception as e:
+                        logger.debug(f"Search enrichment failed: {e}")
+                        continue
+            
+            # Strategy 3: Company website check (if available)
+            if contact.company:
+                company_domain = self._guess_company_domain(contact.company)
+                if company_domain:
+                    try:
+                        response = await session.get(f"https://{company_domain}/about", timeout=10)
+                        if response.status_code == 200:
+                            text = response.text
+                            
+                            # Look for team/contact info
+                            if contact.name.lower() in text.lower():
+                                emails = self._extract_emails_from_text(text)
+                                person_emails = self._filter_person_emails(emails, contact.name, contact.company)
+                                found_emails.update(person_emails)
+                                
+                                if person_emails:
+                                    enrichment_notes.append(f"Company website: {len(person_emails)} emails")
+                        
+                    except Exception as e:
+                        logger.debug(f"Company website check failed: {e}")
+            
+            # Update contact with found information
+            if found_emails:
+                best_email = self._select_best_email(list(found_emails), contact.company)
+                if best_email and (not contact.email or contact.email == 'not-found'):
+                    enriched_data['email'] = best_email
+            
+            if found_phones:
+                best_phone = self._select_best_phone(list(found_phones))
+                if best_phone and (not contact.phone or contact.phone == 'not-found'):
+                    enriched_data['phone'] = best_phone
+            
+            if found_websites:
+                best_website = self._select_best_website(list(found_websites), contact.company)
+                if best_website and (not contact.company_website or contact.company_website == 'not-found'):
+                    enriched_data['company_website'] = best_website
+            
+            # Update enrichment summary
+            if enrichment_notes:
+                enriched_data['profile_summary'] = "HTTP enriched: " + "; ".join(enrichment_notes)
+            
+            # Boost confidence if we found contact info
+            if found_emails or found_phones:
+                original_confidence = enriched_data.get('confidence_score', 0.0)
+                enriched_data['confidence_score'] = min(1.0, original_confidence + 0.15)
+            
+            logger.debug(f"✅ HTTP enriched {contact.name}: {len(found_emails)} emails, {len(found_phones)} phones")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ HTTP enrichment failed for {contact.name}: {e}")
+        
+        return ContactResult(**enriched_data)
+    
+    def _filter_person_emails(self, emails: List[str], person_name: str, company_name: Optional[str] = None) -> List[str]:
+        """Filter emails to find ones likely belonging to the person"""
+        if not emails or not person_name:
+            return []
+        
+        person_emails = []
+        name_parts = [part.lower() for part in person_name.split() if len(part) > 1]
+        
+        for email in emails:
+            email_lower = email.lower()
+            
+            # Skip obvious generic emails
+            if any(generic in email_lower for generic in [
+                'info@', 'contact@', 'support@', 'admin@', 'noreply@', 'no-reply@'
+            ]):
+                continue
+            
+            # Check if email contains person's name parts
+            name_matches = sum(1 for part in name_parts if part in email_lower)
+            
+            # If email contains multiple name parts, likely belongs to person
+            if name_matches >= 2:
+                person_emails.append(email)
+            # If email contains one name part and company, also likely
+            elif name_matches >= 1 and company_name:
+                company_clean = re.sub(r'[^\w]', '', company_name.lower())
+                if company_clean and len(company_clean) > 3:
+                    if company_clean[:8] in email_lower.replace('-', '').replace('_', ''):
+                        person_emails.append(email)
+        
+        return person_emails[:3]  # Limit results
+    
+    def _guess_company_domain(self, company_name: str) -> Optional[str]:
+        """Guess company website domain from name"""
+        if not company_name:
+            return None
+        
+        try:
+            # Clean company name
+            clean_name = re.sub(r'[^\w\s]', '', company_name.lower())
+            clean_name = re.sub(r'\s+', '', clean_name)
+            
+            # Remove common suffixes
+            suffixes = ['inc', 'corp', 'ltd', 'llc', 'company', 'corporation', 'limited']
+            for suffix in suffixes:
+                if clean_name.endswith(suffix):
+                    clean_name = clean_name[:-len(suffix)]
+            
+            # Simple domain guess
+            if len(clean_name) > 2:
+                return f"{clean_name}.com"
+            
+            return None
+            
+        except:
+            return None
     
     async def _enrich_single_contact(self, contact: ContactResult) -> ContactResult:
         """Enrich a single contact with additional data"""
@@ -1843,7 +2117,57 @@ async def test_enrichment_crawler():
             "note": "Enrichment feature will be disabled - basic API search still works"
         }
 
-@app.get("/api/config")
+@app.post("/test/http-enrichment")
+async def test_http_enrichment():
+    """Test HTTP-based enrichment with sample contact"""
+    try:
+        # Create test contact
+        test_contact = ContactResult(
+            name="Satya Nadella",
+            position="CEO",
+            company="Microsoft",
+            linkedin_url="https://linkedin.com/in/satyanadella",
+            confidence_score=0.8
+        )
+        
+        if not scraper.enrichment_crawler:
+            return {
+                "success": False,
+                "message": "Enrichment crawler not initialized"
+            }
+        
+        logger.info("🧪 Testing HTTP-based contact enrichment...")
+        
+        # Test HTTP enrichment directly
+        async with httpx.AsyncClient(timeout=30.0) as session:
+            enriched_contact = await scraper.enrichment_crawler._http_enrich_single_contact(
+                test_contact, session
+            )
+        
+        return {
+            "success": True,
+            "message": "HTTP enrichment test completed",
+            "test_contact": {
+                "original": asdict(test_contact),
+                "enriched": asdict(enriched_contact)
+            },
+            "improvements": {
+                "email_found": enriched_contact.email != test_contact.email,
+                "phone_found": enriched_contact.phone != test_contact.phone,
+                "confidence_boost": enriched_contact.confidence_score > test_contact.confidence_score
+            },
+            "note": "HTTP enrichment works even when browser is unavailable"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ HTTP enrichment test failed: {e}")
+        return {
+            "success": False,
+            "message": f"HTTP enrichment test failed: {str(e)}",
+            "note": "This is the fallback method when browser automation fails"
+        }
+
+@app.get("/api/enrichment-status")
 async def get_configuration():
     """Get current API configuration"""
     return {
