@@ -24,6 +24,12 @@
         .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: #667eea; }
         input:checked + .slider:before { transform: translateX(16px); }
+        .view-toggle-btn { transition: all 0.3s ease; }
+        .view-toggle-btn.active { background-color: #667eea; color: white; }
+        .table-view { max-width: 100%; overflow-x: auto; }
+        .table-view table { font-size: 0.875rem; }
+        .table-view td, .table-view th { padding: 0.75rem; white-space: nowrap; }
+        .table-view td:first-child, .table-view th:first-child { min-width: 150px; }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -95,6 +101,21 @@
                 <!-- Results Panel -->
                 <div class="lg:col-span-8">
                     <div id="resultsContainer" class="bg-white p-6 rounded-2xl shadow-lg min-h-[600px]">
+                        <!-- View Toggle -->
+                        <div id="viewToggleContainer" class="mb-6 hidden">
+                            <div class="flex justify-between items-center">
+                                <h2 class="text-2xl font-bold text-gray-800">Search Results</h2>
+                                <div class="flex bg-gray-100 rounded-lg p-1">
+                                    <button id="cardViewBtn" class="view-toggle-btn px-4 py-2 rounded-md font-medium text-sm active">
+                                        Cards View
+                                    </button>
+                                    <button id="tableViewBtn" class="view-toggle-btn px-4 py-2 rounded-md font-medium text-sm">
+                                        Table View
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div id="resultsContent">
                              <div class="text-center py-20">
                                 <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
@@ -111,15 +132,21 @@
     <script>
         const API_BASE_URL = 'https://web-production-1a49.up.railway.app';
         let currentResults = [];
+        let currentView = 'cards'; // 'cards' or 'table'
 
         const searchForm = document.getElementById('searchForm');
         const searchBtn = document.getElementById('searchBtn');
         const resultsContent = document.getElementById('resultsContent');
         const statusDisplay = document.getElementById('statusDisplay');
+        const viewToggleContainer = document.getElementById('viewToggleContainer');
+        const cardViewBtn = document.getElementById('cardViewBtn');
+        const tableViewBtn = document.getElementById('tableViewBtn');
 
         document.addEventListener('DOMContentLoaded', () => {
             checkAPIStatus();
             searchForm.addEventListener('submit', handleSearch);
+            cardViewBtn.addEventListener('click', () => switchView('cards'));
+            tableViewBtn.addEventListener('click', () => switchView('table'));
         });
 
         async function apiRequest(endpoint, options = {}) {
@@ -152,7 +179,7 @@
                 company: document.getElementById('company').value || null,
                 country: document.getElementById('country').value || null,
                 keywords: document.getElementById('keywords').value || null,
-                max_results: 20, // Simplified for this UI
+                max_results: 50, // Increased for better results
                 use_ai_validation: document.getElementById('use_ai_validation').checked,
                 enable_enrichment: document.getElementById('enable_enrichment').checked
             };
@@ -169,13 +196,32 @@
                 currentResults = results.contacts || [];
                 displayResults(currentResults);
                 showStatus('success', `✅ ${results.message || `Found ${currentResults.length} contacts.`}`);
+                
+                // Show view toggle if we have results
+                if (currentResults.length > 0) {
+                    viewToggleContainer.classList.remove('hidden');
+                } else {
+                    viewToggleContainer.classList.add('hidden');
+                }
 
             } catch (error) {
                 showStatus('error', `❌ Search failed: ${error.message}`);
                 displayResults([]);
+                viewToggleContainer.classList.add('hidden');
             } finally {
                 setLoading(false);
             }
+        }
+
+        function switchView(viewType) {
+            currentView = viewType;
+            
+            // Update button states
+            cardViewBtn.classList.toggle('active', viewType === 'cards');
+            tableViewBtn.classList.toggle('active', viewType === 'table');
+            
+            // Display results in selected view
+            displayResults(currentResults);
         }
 
         function displayResults(contacts) {
@@ -189,8 +235,42 @@
                 return;
             }
             
+            if (currentView === 'table') {
+                displayTableView(contacts);
+            } else {
+                displayCardsView(contacts);
+            }
+        }
+
+        function displayCardsView(contacts) {
             const cardsHTML = contacts.map(createContactCard).join('');
             resultsContent.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">${cardsHTML}</div>`;
+        }
+
+        function displayTableView(contacts) {
+            const tableHTML = `
+                <div class="table-view overflow-x-auto">
+                    <table class="min-w-full bg-white border border-gray-200 rounded-lg">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="text-left font-semibold text-gray-700 border-b">👤 Contact Name</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">💼 Position</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">🏢 Company</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">🔗 Social Media</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">📧 Email</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">🌍 Country</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">🏭 Industry</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">Score</th>
+                                <th class="text-left font-semibold text-gray-700 border-b">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${contacts.map(createTableRow).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            resultsContent.innerHTML = tableHTML;
         }
 
         function createContactCard(contact) {
@@ -199,8 +279,9 @@
             if (score >= 8) scoreClass = 'bg-green-500';
             else if (score >= 6) scoreClass = 'bg-yellow-500';
 
-            const sourceLinkHTML = (contact.profile_url && !contact.linkedin_url) 
-                ? `<a href="${contact.profile_url}" target="_blank" class="flex-1 text-center bg-gray-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-600 transition">View Source</a>`
+            const sourceLink = getSourceLink(contact);
+            const sourceLinkHTML = sourceLink 
+                ? `<a href="${sourceLink}" target="_blank" class="flex-1 text-center bg-gray-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-gray-700 transition">Source</a>`
                 : '';
 
             return `
@@ -218,19 +299,61 @@
                             </div>
                         </div>
                         <p class="mt-2 text-sm text-gray-500">${escapeHtml(contact.company || 'Company not specified')}</p>
-                        <p class="mt-1 text-sm text-gray-500">${escapeHtml(contact.location || 'Location not specified')}</p>
+                        <p class="mt-1 text-sm text-gray-500">${escapeHtml(contact.location || contact.country || 'Location not specified')}</p>
                         
                         <p class="mt-4 text-xs text-gray-500 border-t pt-2">${escapeHtml(contact.quality_notes || contact.summary || 'No summary available.')}</p>
                     </div>
                     <div class="p-4 bg-gray-50 border-t">
-                        <div class="flex items-center space-x-2">
-                            ${contact.linkedin_url ? `<a href="${contact.linkedin_url}" target="_blank" class="flex-1 text-center bg-blue-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600 transition">LinkedIn</a>` : ''}
-                            ${contact.email && contact.email !== 'not-found' ? `<a href="mailto:${contact.email}" class="flex-1 text-center bg-green-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-green-600 transition">Email</a>` : ''}
+                        <div class="flex items-center space-x-1 text-xs">
+                            ${contact.linkedin_url ? `<a href="${contact.linkedin_url}" target="_blank" class="flex-1 text-center bg-blue-500 text-white px-2 py-1 rounded font-semibold hover:bg-blue-600 transition">LinkedIn</a>` : ''}
+                            ${contact.email && contact.email !== 'not-found' ? `<a href="mailto:${contact.email}" class="flex-1 text-center bg-green-500 text-white px-2 py-1 rounded font-semibold hover:bg-green-600 transition">Email</a>` : ''}
+                            ${contact.phone && contact.phone !== 'not-found' ? `<a href="tel:${contact.phone}" class="flex-1 text-center bg-purple-500 text-white px-2 py-1 rounded font-semibold hover:bg-purple-600 transition">Phone</a>` : ''}
                             ${sourceLinkHTML}
                         </div>
                     </div>
                 </div>
             `;
+        }
+
+        function createTableRow(contact) {
+            const score = Math.round((contact.ai_validation_score || contact.confidence_score || 0) * 10);
+            let scoreBadgeClass = 'bg-red-100 text-red-800';
+            if (score >= 8) scoreBadgeClass = 'bg-green-100 text-green-800';
+            else if (score >= 6) scoreBadgeClass = 'bg-yellow-100 text-yellow-800';
+
+            const sourceLink = getSourceLink(contact);
+            
+            return `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="font-semibold text-indigo-600">${escapeHtml(contact.name)}</td>
+                    <td class="text-gray-700">${escapeHtml(contact.position || '-')}</td>
+                    <td class="text-gray-700">${escapeHtml(contact.company || '-')}</td>
+                    <td>
+                        ${contact.linkedin_url ? `<a href="${contact.linkedin_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm">LinkedIn</a>` : '-'}
+                    </td>
+                    <td>
+                        ${contact.email && contact.email !== 'not-found' ? `<a href="mailto:${contact.email}" class="text-green-600 hover:text-green-800 text-sm">${escapeHtml(contact.email)}</a>` : '-'}
+                    </td>
+                    <td class="text-gray-700">${escapeHtml(contact.country || contact.location || '-')}</td>
+                    <td class="text-gray-700">${escapeHtml(contact.industry || '-')}</td>
+                    <td>
+                        <span class="px-2 py-1 rounded-full text-xs font-semibold ${scoreBadgeClass}">
+                            ${score}/10
+                        </span>
+                    </td>
+                    <td>
+                        <div class="flex space-x-1">
+                            ${contact.phone && contact.phone !== 'not-found' ? `<a href="tel:${contact.phone}" class="text-purple-600 hover:text-purple-800 text-xs">Phone</a>` : ''}
+                            ${sourceLink ? `<a href="${sourceLink}" target="_blank" class="text-gray-600 hover:text-gray-800 text-xs">Source</a>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        function getSourceLink(contact) {
+            // Priority order: LinkedIn URL, company website, or any other profile URL
+            return contact.linkedin_url || contact.company_website || contact.profile_url || null;
         }
 
         function setLoading(isLoading) {
