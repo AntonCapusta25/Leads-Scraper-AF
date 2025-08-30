@@ -65,17 +65,44 @@ class SearchParameters:
     use_ai_validation: bool = True
     enable_caching: bool = True
     enable_enrichment: bool = False  # New parameter for contact enrichment
+    search_linkedin: bool = True
+    search_google: bool = False
+    search_facebook: bool = False
+    search_instagram: bool = False
+    search_tiktok: bool = False
+    search_job_sites: bool = False
+    
+    def get_job_sites_by_country(self) -> List[str]:
+        """Get popular job sites by country"""
+        job_sites_map = {
+            'united states': ['indeed.com', 'linkedin.com/jobs', 'glassdoor.com', 'monster.com', 'careerbuilder.com'],
+            'usa': ['indeed.com', 'linkedin.com/jobs', 'glassdoor.com', 'monster.com', 'careerbuilder.com'],
+            'canada': ['indeed.ca', 'workopolis.com', 'monster.ca', 'eluta.ca', 'linkedin.com/jobs'],
+            'united kingdom': ['indeed.co.uk', 'reed.co.uk', 'totaljobs.com', 'cv-library.co.uk', 'jobsite.co.uk'],
+            'uk': ['indeed.co.uk', 'reed.co.uk', 'totaljobs.com', 'cv-library.co.uk', 'jobsite.co.uk'],
+            'germany': ['stepstone.de', 'xing.com', 'indeed.de', 'monster.de', 'jobware.de'],
+            'france': ['indeed.fr', 'monster.fr', 'leboncoin.fr', 'apec.fr', 'regionsjob.com'],
+            'netherlands': ['indeed.nl', 'monsterboard.nl', 'nationale-vacaturebank.nl', 'jobbird.com', 'werk.nl'],
+            'australia': ['seek.com.au', 'indeed.com.au', 'jora.com', 'careerone.com.au', 'linkedin.com/jobs'],
+            'spain': ['indeed.es', 'infojobs.net', 'monster.es', 'trabajos.com', 'jobtoday.com'],
+            'italy': ['indeed.it', 'monster.it', 'infojobs.it', 'subito.it', 'adecco.it'],
+            'brazil': ['catho.com.br', 'vagas.com.br', 'indeed.com.br', 'linkedin.com/jobs', 'trampos.co'],
+            'india': ['naukri.com', 'monster.com', 'indeed.co.in', 'timesjobs.com', 'shine.com'],
+            'japan': ['indeed.com', 'rikunabi.com', 'mynavi.jp', 'doda.jp', 'en-japan.com'],
+            'default': ['indeed.com', 'linkedin.com/jobs', 'monster.com', 'glassdoor.com']
+        }
+        
+        country_key = self.country.lower() if self.country else 'default'
+        return job_sites_map.get(country_key, job_sites_map['default'])
     
     def to_search_query(self) -> str:
-        """Convert to optimized Google search query that finds people, not articles"""
+        """Convert to optimized multi-platform Google search query"""
         parts = []
         
         # Core search terms with person-focused approach
         if self.query:
-            # If query looks like a business/industry term, make it person-focused
             if any(business_term in self.query.lower() for business_term in 
                    ['construction', 'business', 'company', 'industry', 'firm', 'services']):
-                # Convert business query to people query
                 person_focused_query = f'"{self.query}" (CEO OR founder OR owner OR manager OR director)'
             else:
                 person_focused_query = f'"{self.query}"'
@@ -96,17 +123,42 @@ class SearchParameters:
         elif self.city:
             parts.append(f'"{self.city}"')
         
-        # Enhanced keywords logic
+        # Platform-specific search logic
+        site_filters = []
+        
+        if self.search_linkedin:
+            site_filters.append('site:linkedin.com/in/')
+            
+        if self.search_facebook:
+            site_filters.append('site:facebook.com')
+            
+        if self.search_instagram:
+            site_filters.append('site:instagram.com')
+            
+        if self.search_tiktok:
+            site_filters.append('site:tiktok.com')
+            
+        if self.search_job_sites:
+            job_sites = self.get_job_sites_by_country()
+            for site in job_sites[:3]:  # Limit to top 3 job sites
+                site_filters.append(f'site:{site}')
+        
+        # Apply site filters
+        if site_filters:
+            if len(site_filters) == 1:
+                parts.append(site_filters[0])
+            else:
+                # Use OR operator for multiple sites
+                parts.append(f'({" OR ".join(site_filters)})')
+        
+        # Add custom keywords if provided
         if self.keywords:
             parts.append(self.keywords)
-        else:
-            # Default to people-focused search
-            parts.append('site:linkedin.com/in/')
-            # Add person indicators to avoid articles
+        elif not site_filters and self.search_google:
+            # Pure Google search - add person indicators to avoid articles
             parts.append('(profile OR "works at" OR "CEO" OR "founder" OR "manager")')
-            # Exclude article-like content
             parts.append('-"how to" -guide -tips -"best practices" -article -blog -news')
-            
+        
         return " ".join(parts)
 
 @dataclass  
@@ -119,6 +171,9 @@ class ContactResult:
     country: Optional[str] = None
     industry: Optional[str] = None
     linkedin_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    tiktok_url: Optional[str] = None
     company_website: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -126,6 +181,7 @@ class ContactResult:
     profile_summary: Optional[str] = None
     search_query: Optional[str] = None
     search_source: str = "Google Custom Search API"
+    platform_found: Optional[str] = None  # Which platform this contact was found on
     confidence_score: float = 0.0
     ai_validation_score: Optional[float] = None
     quality_notes: Optional[str] = None
@@ -307,6 +363,67 @@ class ContactCache:
             
         except Exception as e:
             logger.error(f"❌ Cache cleanup failed: {e}")
+
+class EnhancedEmailExtractor:
+    """Enhanced email extraction for multi-platform sources"""
+    
+    @staticmethod
+    def extract_emails_from_text(text: str) -> List[str]:
+        """Extract email addresses using comprehensive patterns"""
+        email_patterns = [
+            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+            r'[A-Za-z0-9._%+-]+\s*\[\s*at\s*\]\s*[A-Za-z0-9.-]+\s*\[\s*dot\s*\]\s*[A-Za-z]{2,}',
+            r'[A-Za-z0-9._%+-]+\s*@\s*[A-Za-z0-9.-]+\s*\.\s*[A-Za-z]{2,}',
+            r'[A-Za-z0-9._%+-]+\s*\(at\)\s*[A-Za-z0-9.-]+\s*\(dot\)\s*[A-Za-z]{2,}',
+            r'mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})',
+        ]
+        
+        emails = []
+        for pattern in email_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            emails.extend(matches)
+        
+        # Clean and validate emails
+        clean_emails = []
+        for email in emails:
+            # Handle tuple results from regex groups
+            if isinstance(email, tuple):
+                email = email[0] if email else continue
+                
+            # Clean up obfuscated emails
+            clean_email = email.replace(' [at] ', '@').replace(' [dot] ', '.')
+            clean_email = clean_email.replace(' (at) ', '@').replace(' (dot) ', '.')
+            clean_email = clean_email.replace(' ', '')
+            
+            # Basic email validation
+            if '@' in clean_email and '.' in clean_email.split('@')[1]:
+                if len(clean_email) > 5 and len(clean_email) < 254:  # RFC limits
+                    clean_emails.append(clean_email.lower())
+        
+        # Remove duplicates and filter generic emails
+        unique_emails = list(set(clean_emails))
+        filtered_emails = [
+            email for email in unique_emails
+            if not any(generic in email for generic in [
+                'noreply', 'no-reply', 'donotreply', 'info@', 'support@', 
+                'admin@', 'hello@', 'contact@', 'sales@', 'marketing@'
+            ])
+        ]
+        
+        return filtered_emails[:10]  # Return top 10 emails
+    
+    @staticmethod
+    def extract_linkedin_email(linkedin_url: str, session) -> Optional[str]:
+        """Try to extract email from LinkedIn profile"""
+        try:
+            response = session.get(linkedin_url, follow_redirects=True, timeout=10)
+            if response.status_code == 200:
+                text = response.text
+                emails = EnhancedEmailExtractor.extract_emails_from_text(text)
+                return emails[0] if emails else None
+        except:
+            pass
+        return None
 
 class GoogleSearchClient:
     """Google Custom Search API client"""
@@ -1528,7 +1645,102 @@ Return empty array [] if no leads meet professional standards (score < 7.0).
 
 class RailwayContactScraperAPI:
     """Railway-optimized contact scraper using Google Custom Search API"""
-    
+    def _identify_platform(self, url: str) -> str:
+        """Identify which platform a URL belongs to"""
+        url_lower = url.lower()
+        
+        if 'linkedin.com' in url_lower:
+            return 'linkedin'
+        elif 'facebook.com' in url_lower:
+            return 'facebook'
+        elif 'instagram.com' in url_lower:
+            return 'instagram'
+        elif 'tiktok.com' in url_lower:
+            return 'tiktok'
+        elif any(job_site in url_lower for job_site in ['indeed', 'monster', 'glassdoor', 'jooble']):
+            return 'job_site'
+        else:
+            return 'google'
+
+    def _extract_name_by_platform(self, url: str, title: str, platform: str) -> Optional[str]:
+        """Extract name based on platform"""
+        if platform == 'linkedin':
+            return self._extract_name_from_linkedin(url) or self._extract_name_from_title(title)
+        elif platform == 'facebook':
+            return self._extract_name_from_facebook(url) or self._extract_name_from_title(title)
+        elif platform == 'instagram':
+            return self._extract_name_from_instagram(title)
+        elif platform == 'tiktok':
+            return self._extract_name_from_tiktok(title)
+        else:
+            return self._extract_name_from_title(title)
+
+    def _extract_name_from_facebook(self, url: str) -> Optional[str]:
+        """Extract name from Facebook URL"""
+        try:
+            if 'facebook.com' not in url:
+                return None
+            
+            # Facebook profile patterns: facebook.com/firstname.lastname or facebook.com/profile.php?id=
+            if '/profile.php?id=' in url:
+                return None  # Can't extract name from numeric ID
+            
+            # Extract from facebook.com/username format
+            match = re.search(r'facebook\.com/([^/?]+)', url)
+            if match:
+                username = match.group(1)
+                # Convert username to readable name
+                name_parts = username.replace('.', ' ').replace('-', ' ').split()
+                if len(name_parts) >= 2:
+                    first_name = name_parts[0].capitalize()
+                    last_name = name_parts[1].capitalize()
+                    return f"{first_name} {last_name}"
+            
+            return None
+        except:
+            return None
+
+    def _extract_name_from_instagram(self, title: str) -> Optional[str]:
+        """Extract name from Instagram title"""
+        try:
+            # Instagram titles often have format: "Name (@username) • Instagram"
+            patterns = [
+                r'^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+\(@',
+                r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s*•\s*Instagram',
+                r'^([A-Z][a-z]+\s+[A-Z][a-z]+)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, title)
+                if match:
+                    name = match.group(1).strip()
+                    if self._is_valid_name(name):
+                        return name
+            
+            return None
+        except:
+            return None
+
+    def _extract_name_from_tiktok(self, title: str) -> Optional[str]:
+        """Extract name from TikTok title"""
+        try:
+            # TikTok titles often have format: "Name (@username) | TikTok"
+            patterns = [
+                r'^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+\(@',
+                r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s*\|\s*TikTok',
+                r'^([A-Z][a-z]+\s+[A-Z][a-z]+)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, title)
+                if match:
+                    name = match.group(1).strip()
+                    if self._is_valid_name(name):
+                        return name
+            
+            return None
+        except:
+            return None
     def __init__(self):
         self.google_client = None
         self.openai_validator = None
@@ -1620,23 +1832,26 @@ class RailwayContactScraperAPI:
         
         return final_results
     
-    def _parse_search_result(self, item: Dict, params: SearchParameters) -> Optional[ContactResult]:
-        """Parse Google search result into ContactResult with better person filtering"""
+def _parse_search_result(self, item: Dict, params: SearchParameters) -> Optional[ContactResult]:
+        """Parse Google search result with multi-platform support"""
         try:
             title = item.get('title', '')
             link = item.get('link', '')
             snippet = item.get('snippet', '')
             
+            # Determine which platform this result is from
+            platform_found = self._identify_platform(link)
+            
             # Early filtering: Skip obvious non-person results
             if self._is_article_or_business_content(title, snippet):
                 return None
             
-            # Skip non-LinkedIn results unless specifically requested
-            if 'linkedin.com/in/' not in link and not params.keywords:
+            # Platform-specific filtering
+            if platform_found == 'linkedin' and 'linkedin.com/in/' not in link:
                 return None
             
-            # Extract name from LinkedIn URL or title
-            name = self._extract_name_from_linkedin(link) or self._extract_name_from_title(title)
+            # Extract name based on platform
+            name = self._extract_name_by_platform(link, title, platform_found)
             if not name:
                 return None
             
@@ -1649,30 +1864,46 @@ class RailwayContactScraperAPI:
             company = self._extract_company(title, snippet, params.company)
             location = self._extract_location(snippet, params.country, params.city)
             
+            # Extract emails from snippet
+            emails = EnhancedEmailExtractor.extract_emails_from_text(f"{title} {snippet}")
+            best_email = emails[0] if emails else None
+            
             # Calculate base confidence
             confidence = self._calculate_confidence(name, position, company, location, params)
             
             if confidence < 0.3:  # Minimum threshold
                 return None
             
-            contact = ContactResult(
-                name=name,
-                position=position,
-                company=company,
-                location=location,
-                country=self._extract_country(location, params.country),
-                industry=params.industry,
-                linkedin_url=link if 'linkedin.com' in link else None,
-                profile_summary=snippet[:200] if snippet else None,
-                search_query=params.query,
-                confidence_score=confidence,
-                experience_level=self._infer_experience_level(position, snippet)
-            )
+            # Create contact with platform-specific URLs
+            contact_data = {
+                'name': name,
+                'position': position,
+                'company': company,
+                'location': location,
+                'country': self._extract_country(location, params.country),
+                'industry': params.industry,
+                'email': best_email,
+                'profile_summary': snippet[:200] if snippet else None,
+                'search_query': params.query,
+                'confidence_score': confidence,
+                'experience_level': self._infer_experience_level(position, snippet),
+                'platform_found': platform_found
+            }
             
-            return contact
+            # Set platform-specific URLs
+            if platform_found == 'linkedin':
+                contact_data['linkedin_url'] = link
+            elif platform_found == 'facebook':
+                contact_data['facebook_url'] = link
+            elif platform_found == 'instagram':
+                contact_data['instagram_url'] = link
+            elif platform_found == 'tiktok':
+                contact_data['tiktok_url'] = link
+            
+            return ContactResult(**contact_data)
             
         except Exception as e:
-            logger.debug(f"⚠️ Failed to parse search result: {e}")
+            logger.debug(f"Failed to parse search result: {e}")
             return None
     
     def _is_article_or_business_content(self, title: str, snippet: str) -> bool:
@@ -2040,6 +2271,13 @@ class SearchRequest(BaseModel):
     use_ai_validation: bool = Field(True, description="Enable AI validation")
     enable_caching: bool = Field(True, description="Enable smart caching")
     enable_enrichment: bool = Field(False, description="Enable contact enrichment crawling (finds emails/phones)")
+    # Multi-platform search options
+    search_linkedin: bool = Field(True, description="Search LinkedIn profiles")
+    search_google: bool = Field(False, description="Search general Google results") 
+    search_facebook: bool = Field(False, description="Search Facebook profiles")
+    search_instagram: bool = Field(False, description="Search Instagram profiles")
+    search_tiktok: bool = Field(False, description="Search TikTok profiles")
+    search_job_sites: bool = Field(False, description="Search job sites (Indeed, Monster, etc.)")
 
 class ContactResponse(BaseModel):
     name: str
@@ -2049,6 +2287,9 @@ class ContactResponse(BaseModel):
     country: Optional[str] = None
     industry: Optional[str] = None
     linkedin_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    tiktok_url: Optional[str] = None
     company_website: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -2056,6 +2297,7 @@ class ContactResponse(BaseModel):
     profile_summary: Optional[str] = None
     search_query: Optional[str] = None
     search_source: str
+    platform_found: Optional[str] = None
     confidence_score: float
     ai_validation_score: Optional[float] = None
     quality_notes: Optional[str] = None
