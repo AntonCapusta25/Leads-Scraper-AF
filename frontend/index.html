@@ -75,6 +75,37 @@
                                     <input type="text" id="keywords" name="keywords" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="e.g., site:linkedin.com/in">
                                 </div>
                                 
+                                <!-- Search Platforms -->
+                                <div class="pt-4 border-t">
+                                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Search Platforms</h3>
+                                    <div class="space-y-3">
+                                        <div class="flex items-center justify-between">
+                                            <label for="search_linkedin" class="text-sm font-medium text-gray-700">💼 LinkedIn</label>
+                                            <label class="switch"><input type="checkbox" id="search_linkedin" checked><span class="slider"></span></label>
+                                        </div>
+                                        <div class="flex items-center justify-between">
+                                            <label for="search_google" class="text-sm font-medium text-gray-700">🔍 Pure Google</label>
+                                            <label class="switch"><input type="checkbox" id="search_google"><span class="slider"></span></label>
+                                        </div>
+                                        <div class="flex items-center justify-between">
+                                            <label for="search_facebook" class="text-sm font-medium text-gray-700">📘 Facebook</label>
+                                            <label class="switch"><input type="checkbox" id="search_facebook"><span class="slider"></span></label>
+                                        </div>
+                                        <div class="flex items-center justify-between">
+                                            <label for="search_instagram" class="text-sm font-medium text-gray-700">📷 Instagram</label>
+                                            <label class="switch"><input type="checkbox" id="search_instagram"><span class="slider"></span></label>
+                                        </div>
+                                        <div class="flex items-center justify-between">
+                                            <label for="search_tiktok" class="text-sm font-medium text-gray-700">🎵 TikTok</label>
+                                            <label class="switch"><input type="checkbox" id="search_tiktok"><span class="slider"></span></label>
+                                        </div>
+                                        <div class="flex items-center justify-between">
+                                            <label for="search_job_sites" class="text-sm font-medium text-gray-700">💼 Job Sites</label>
+                                            <label class="switch"><input type="checkbox" id="search_job_sites"><span class="slider"></span></label>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Advanced Options -->
                                 <div class="pt-4 border-t">
                                     <h3 class="text-lg font-semibold text-gray-700 mb-3">Advanced Options</h3>
@@ -181,7 +212,14 @@
                 keywords: document.getElementById('keywords').value || null,
                 max_results: 50, // Increased for better results
                 use_ai_validation: document.getElementById('use_ai_validation').checked,
-                enable_enrichment: document.getElementById('enable_enrichment').checked
+                enable_enrichment: document.getElementById('enable_enrichment').checked,
+                // Multi-platform search options
+                search_linkedin: document.getElementById('search_linkedin').checked,
+                search_google: document.getElementById('search_google').checked,
+                search_facebook: document.getElementById('search_facebook').checked,
+                search_instagram: document.getElementById('search_instagram').checked,
+                search_tiktok: document.getElementById('search_tiktok').checked,
+                search_job_sites: document.getElementById('search_job_sites').checked
             };
 
             setLoading(true);
@@ -279,17 +317,59 @@
             if (score >= 8) scoreClass = 'bg-green-500';
             else if (score >= 6) scoreClass = 'bg-yellow-500';
 
-            const sourceLink = getSourceLink(contact);
-            const sourceLinkHTML = sourceLink 
-                ? `<a href="${sourceLink}" target="_blank" class="flex-1 text-center bg-gray-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-gray-700 transition">Source</a>`
+            // Get platform badge
+            const platformBadge = getPlatformBadge(contact.platform_found || 'google');
+
+            // Email display - show prominently if available
+            const emailDisplay = contact.email && contact.email !== 'not-found' 
+                ? `<div class="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                     <div class="flex items-center">
+                       <span class="text-green-600 text-xs font-medium">📧 Email Found:</span>
+                       <a href="mailto:${contact.email}" class="text-green-700 text-sm font-semibold ml-2 truncate">${escapeHtml(contact.email)}</a>
+                     </div>
+                   </div>`
                 : '';
+
+            // Social media buttons
+            const socialButtons = [];
+            
+            if (contact.linkedin_url) {
+                socialButtons.push(`<a href="${contact.linkedin_url}" target="_blank" class="flex-1 text-center bg-blue-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-blue-700 transition">LinkedIn</a>`);
+            }
+            if (contact.facebook_url) {
+                socialButtons.push(`<a href="${contact.facebook_url}" target="_blank" class="flex-1 text-center bg-blue-800 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-blue-900 transition">Facebook</a>`);
+            }
+            if (contact.instagram_url) {
+                socialButtons.push(`<a href="${contact.instagram_url}" target="_blank" class="flex-1 text-center bg-pink-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-pink-700 transition">Instagram</a>`);
+            }
+            if (contact.tiktok_url) {
+                socialButtons.push(`<a href="${contact.tiktok_url}" target="_blank" class="flex-1 text-center bg-black text-white px-2 py-1 rounded text-xs font-semibold hover:bg-gray-800 transition">TikTok</a>`);
+            }
+
+            // Contact action buttons
+            const contactButtons = [];
+            
+            if (contact.email && contact.email !== 'not-found') {
+                contactButtons.push(`<a href="mailto:${contact.email}" class="flex-1 text-center bg-green-500 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-green-600 transition">Email</a>`);
+            }
+            if (contact.phone && contact.phone !== 'not-found') {
+                contactButtons.push(`<a href="tel:${contact.phone}" class="flex-1 text-center bg-purple-500 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-purple-600 transition">Phone</a>`);
+            }
+
+            const sourceLink = getSourceLink(contact);
+            if (sourceLink) {
+                contactButtons.push(`<a href="${sourceLink}" target="_blank" class="flex-1 text-center bg-gray-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-gray-700 transition">Source</a>`);
+            }
 
             return `
                 <div class="contact-card bg-white rounded-xl shadow-md overflow-hidden flex flex-col">
                     <div class="p-6 flex-grow">
-                        <div class="flex justify-between items-start">
+                        <div class="flex justify-between items-start mb-2">
                             <div class="w-full pr-4">
-                                <p class="text-lg font-bold text-indigo-600 truncate">${escapeHtml(contact.name)}</p>
+                                <div class="flex items-center gap-2 mb-1">
+                                    <p class="text-lg font-bold text-indigo-600 truncate">${escapeHtml(contact.name)}</p>
+                                    ${platformBadge}
+                                </div>
                                 <p class="text-gray-600 text-sm truncate">${escapeHtml(contact.position || 'Position not specified')}</p>
                             </div>
                             <div class="flex-shrink-0">
@@ -298,18 +378,16 @@
                                 </div>
                             </div>
                         </div>
-                        <p class="mt-2 text-sm text-gray-500">${escapeHtml(contact.company || 'Company not specified')}</p>
-                        <p class="mt-1 text-sm text-gray-500">${escapeHtml(contact.location || contact.country || 'Location not specified')}</p>
+                        <p class="text-sm text-gray-500">${escapeHtml(contact.company || 'Company not specified')}</p>
+                        <p class="text-sm text-gray-500">${escapeHtml(contact.location || contact.country || 'Location not specified')}</p>
                         
-                        <p class="mt-4 text-xs text-gray-500 border-t pt-2">${escapeHtml(contact.quality_notes || contact.summary || 'No summary available.')}</p>
+                        ${emailDisplay}
+                        
+                        <p class="mt-4 text-xs text-gray-500 border-t pt-2">${escapeHtml(contact.quality_notes || contact.profile_summary || 'No summary available.')}</p>
                     </div>
-                    <div class="p-4 bg-gray-50 border-t">
-                        <div class="flex items-center space-x-1 text-xs">
-                            ${contact.linkedin_url ? `<a href="${contact.linkedin_url}" target="_blank" class="flex-1 text-center bg-blue-500 text-white px-2 py-1 rounded font-semibold hover:bg-blue-600 transition">LinkedIn</a>` : ''}
-                            ${contact.email && contact.email !== 'not-found' ? `<a href="mailto:${contact.email}" class="flex-1 text-center bg-green-500 text-white px-2 py-1 rounded font-semibold hover:bg-green-600 transition">Email</a>` : ''}
-                            ${contact.phone && contact.phone !== 'not-found' ? `<a href="tel:${contact.phone}" class="flex-1 text-center bg-purple-500 text-white px-2 py-1 rounded font-semibold hover:bg-purple-600 transition">Phone</a>` : ''}
-                            ${sourceLinkHTML}
-                        </div>
+                    <div class="p-4 bg-gray-50 border-t space-y-2">
+                        ${socialButtons.length > 0 ? `<div class="flex items-center space-x-1">${socialButtons.join('')}</div>` : ''}
+                        ${contactButtons.length > 0 ? `<div class="flex items-center space-x-1">${contactButtons.join('')}</div>` : ''}
                     </div>
                 </div>
             `;
@@ -321,19 +399,40 @@
             if (score >= 8) scoreBadgeClass = 'bg-green-100 text-green-800';
             else if (score >= 6) scoreBadgeClass = 'bg-yellow-100 text-yellow-800';
 
+            // Platform badge
+            const platformBadge = getPlatformBadge(contact.platform_found || 'google');
+
+            // Social media links
+            const socialLinks = [];
+            if (contact.linkedin_url) socialLinks.push(`<a href="${contact.linkedin_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm mr-2">LinkedIn</a>`);
+            if (contact.facebook_url) socialLinks.push(`<a href="${contact.facebook_url}" target="_blank" class="text-blue-800 hover:text-blue-900 text-sm mr-2">Facebook</a>`);
+            if (contact.instagram_url) socialLinks.push(`<a href="${contact.instagram_url}" target="_blank" class="text-pink-600 hover:text-pink-800 text-sm mr-2">Instagram</a>`);
+            if (contact.tiktok_url) socialLinks.push(`<a href="${contact.tiktok_url}" target="_blank" class="text-gray-900 hover:text-black text-sm mr-2">TikTok</a>`);
+            
+            const socialLinksHTML = socialLinks.length > 0 ? socialLinks.join('') : '-';
+
+            // Email display with prominent styling
+            const emailDisplay = contact.email && contact.email !== 'not-found' 
+                ? `<div class="flex items-center">
+                     <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium mr-2">📧</span>
+                     <a href="mailto:${contact.email}" class="text-green-700 hover:text-green-900 text-sm font-medium">${escapeHtml(contact.email)}</a>
+                   </div>`
+                : '<span class="text-gray-400">-</span>';
+
             const sourceLink = getSourceLink(contact);
             
             return `
                 <tr class="border-b hover:bg-gray-50">
-                    <td class="font-semibold text-indigo-600">${escapeHtml(contact.name)}</td>
+                    <td class="font-semibold text-indigo-600">
+                        <div class="flex items-center gap-2">
+                            ${escapeHtml(contact.name)}
+                            ${platformBadge}
+                        </div>
+                    </td>
                     <td class="text-gray-700">${escapeHtml(contact.position || '-')}</td>
                     <td class="text-gray-700">${escapeHtml(contact.company || '-')}</td>
-                    <td>
-                        ${contact.linkedin_url ? `<a href="${contact.linkedin_url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm">LinkedIn</a>` : '-'}
-                    </td>
-                    <td>
-                        ${contact.email && contact.email !== 'not-found' ? `<a href="mailto:${contact.email}" class="text-green-600 hover:text-green-800 text-sm">${escapeHtml(contact.email)}</a>` : '-'}
-                    </td>
+                    <td>${socialLinksHTML}</td>
+                    <td>${emailDisplay}</td>
                     <td class="text-gray-700">${escapeHtml(contact.country || contact.location || '-')}</td>
                     <td class="text-gray-700">${escapeHtml(contact.industry || '-')}</td>
                     <td>
@@ -351,9 +450,28 @@
             `;
         }
 
+        function getPlatformBadge(platform) {
+            const badges = {
+                'linkedin': '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">💼 LinkedIn</span>',
+                'facebook': '<span class="bg-blue-100 text-blue-900 px-2 py-1 rounded-full text-xs font-medium">📘 Facebook</span>',
+                'instagram': '<span class="bg-pink-100 text-pink-800 px-2 py-1 rounded-full text-xs font-medium">📷 Instagram</span>',
+                'tiktok': '<span class="bg-gray-100 text-gray-900 px-2 py-1 rounded-full text-xs font-medium">🎵 TikTok</span>',
+                'job_site': '<span class="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs font-medium">💼 Job Site</span>',
+                'google': '<span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">🔍 Google</span>'
+            };
+            
+            return badges[platform] || badges['google'];
+        }
+
         function getSourceLink(contact) {
-            // Priority order: LinkedIn URL, company website, or any other profile URL
-            return contact.linkedin_url || contact.company_website || contact.profile_url || null;
+            // Priority order for source links
+            return contact.linkedin_url || 
+                   contact.facebook_url || 
+                   contact.instagram_url || 
+                   contact.tiktok_url || 
+                   contact.company_website || 
+                   contact.profile_url || 
+                   null;
         }
 
         function setLoading(isLoading) {
