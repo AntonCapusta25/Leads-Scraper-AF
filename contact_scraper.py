@@ -1704,20 +1704,21 @@ class RailwayContactScraperAPI:
             return None
 
     def _extract_name_from_instagram(self, title: str) -> Optional[str]:
-        """Extract name from Instagram title"""
+        """Extract any name from Instagram title - businesses and people"""
         try:
-            # Instagram titles often have format: "Name (@username) • Instagram"
+            # Very permissive patterns for any Instagram account
             patterns = [
-                r'^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+\(@',
-                r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s*•\s*Instagram',
-                r'^([A-Z][a-z]+\s+[A-Z][a-z]+)'
+                r'^([^@•\(\)]+?)\s*\(@',  # "Anything (@username)"
+                r'^([^@•\(\)]+?)\s*•\s*Instagram',  # "Anything • Instagram"
+                r'^([^@•\(\)]+?)\s*\(',  # "Anything (something)"
+                r'^([^@•\(\)]{3,50})',  # Just take the first part before special chars
             ]
             
             for pattern in patterns:
-                match = re.search(pattern, title)
+                match = re.search(pattern, title.strip())
                 if match:
                     name = match.group(1).strip()
-                    if self._is_valid_name(name):
+                    if len(name) > 2 and len(name) < 60:
                         return name
             
             return None
@@ -1845,8 +1846,8 @@ class RailwayContactScraperAPI:
             # Determine which platform this result is from
             platform_found = self._identify_platform(link)
             
-            # Early filtering: Skip obvious non-person results
-            if self._is_article_or_business_content(title, snippet):
+            # Only filter out articles, not business accounts
+            if self._is_pure_article_content(title, snippet):
                 return None
             
             # Platform-specific filtering
@@ -1858,8 +1859,8 @@ class RailwayContactScraperAPI:
             if not name:
                 return None
             
-            # Additional validation: name should sound like a person
-            if not self._sounds_like_person_name(name, title, snippet):
+            # Accept any valid name (person or business)
+            if not self._is_valid_account_name(name):
                 return None
             
             # Extract other information
@@ -1908,6 +1909,48 @@ class RailwayContactScraperAPI:
         except Exception as e:
             logger.debug(f"Failed to parse search result: {e}")
             return None
+    def _is_valid_account_name(self, name: str) -> bool:
+        """Accept any reasonable account name - person or business"""
+        try:
+            # Basic checks only
+            if not name or len(name) < 2 or len(name) > 60:
+                return False
+            
+            # Skip only obvious spam/broken names
+            if re.search(r'^[^A-Za-z]|[^\w\s&.\''-]', name):
+                return False
+            
+            # Skip platform names only
+            platform_names = ['instagram', 'facebook', 'tiktok', 'linkedin']
+            if name.lower() in platform_names:
+                return False
+            
+            # Accept everything else (businesses, people, brands, studios, etc.)
+            return True
+            
+        except:
+            return False
+    def _is_pure_article_content(self, title: str, snippet: str) -> bool:
+        """Only filter out pure article content - allow all business accounts"""
+        try:
+            content = f"{title} {snippet}".lower()
+            
+            # Only block obvious articles/tutorials - nothing else
+            article_only_patterns = [
+                r'\b(how to|tutorial|guide to)\b.*\b(step|steps)\b',
+                r'\b(top \d+|best \d+|worst \d+)\b.*\b(list|ranking)\b',
+                r'\b(review|comparison)\b.*\b(vs\.|versus)\b',
+                r'\b(news|press release|announcement)\b'
+            ]
+            
+            for pattern in article_only_patterns:
+                if re.search(pattern, content):
+                    return True
+            
+            return False
+            
+        except:
+            return False
     
     def _is_article_or_business_content(self, title: str, snippet: str) -> bool:
         """Check if this looks like an article or business content rather than a person"""
