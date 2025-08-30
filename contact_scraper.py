@@ -1917,7 +1917,7 @@ class RailwayContactScraperAPI:
                 return False
             
             # Skip only obvious spam/broken names
-            if re.search(r'^[^A-Za-z]|[^\w\s&.\''-]', name):
+            if re.search(r'^[^A-Za-z]|[^\w\s&.\'-]', name):
                 return False
             
             # Skip platform names only
