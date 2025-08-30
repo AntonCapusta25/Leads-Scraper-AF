@@ -388,8 +388,11 @@ class EnhancedEmailExtractor:
         for email in emails:
             # Handle tuple results from regex groups
             if isinstance(email, tuple):
-                email = email[0] if email else continue
-                
+                if email:
+                    email = email[0]
+                else:
+                    continue
+
             # Clean up obfuscated emails
             clean_email = email.replace(' [at] ', '@').replace(' [dot] ', '.')
             clean_email = clean_email.replace(' (at) ', '@').replace(' (dot) ', '.')
