@@ -1835,7 +1835,7 @@ class RailwayContactScraperAPI:
         
         return final_results
     
-def _parse_search_result(self, item: Dict, params: SearchParameters) -> Optional[ContactResult]:
+    def _parse_search_result(self, item: Dict, params: SearchParameters) -> Optional[ContactResult]:
         """Parse Google search result with multi-platform support"""
         try:
             title = item.get('title', '')
